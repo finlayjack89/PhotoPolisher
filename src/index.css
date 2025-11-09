@@ -1,0 +1,193 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* LuxSnap Design System - Professional Photo Studio Aesthetic
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Studio Theme - Light backgrounds to showcase photos */
+    --background: 0 0% 98%;
+    --foreground: 220 15% 25%;
+
+    /* Card system with subtle elevation */
+    --card: 0 0% 100%;
+    --card-foreground: 220 15% 25%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 15% 25%;
+
+    /* Professional navy primary with electric blue accents */
+    --primary: 220 25% 15%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Electric blue for actions and highlights */
+    --electric: 210 100% 60%;
+    --electric-foreground: 0 0% 100%;
+
+    /* Subtle secondary tones */
+    --secondary: 220 10% 96%;
+    --secondary-foreground: 220 15% 25%;
+
+    /* Muted tones for less important content */
+    --muted: 220 8% 92%;
+    --muted-foreground: 220 10% 50%;
+
+    /* Accent for interactive elements */
+    --accent: 220 8% 94%;
+    --accent-foreground: 220 15% 25%;
+
+    /* Status colors */
+    --destructive: 0 85% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 70% 45%;
+    --success-foreground: 0 0% 100%;
+
+    /* Border and input styling */
+    --border: 220 10% 85%;
+    --input: 220 10% 90%;
+    --ring: 210 100% 60%;
+
+    /* Design system variables */
+    --radius: 0.75rem;
+
+    /* Custom gradients for studio feel */
+    --gradient-primary: linear-gradient(135deg, hsl(220, 25%, 15%) 0%, hsl(220, 30%, 25%) 100%);
+    --gradient-electric: linear-gradient(135deg, hsl(210, 100%, 60%) 0%, hsl(250, 100%, 65%) 100%);
+    --gradient-glass: linear-gradient(135deg, hsla(0, 0%, 100%, 0.1) 0%, hsla(0, 0%, 100%, 0.05) 100%);
+
+    /* Shadows for depth */
+    --shadow-soft: 0 2px 20px hsla(220, 25%, 15%, 0.08);
+    --shadow-medium: 0 8px 30px hsla(220, 25%, 15%, 0.12);
+    --shadow-strong: 0 20px 40px hsla(220, 25%, 15%, 0.18);
+
+    /* Glass morphism effect */
+    --glass-backdrop: hsla(0, 0%, 100%, 0.8);
+    --glass-border: hsla(0, 0%, 100%, 0.2);
+
+    /* Smooth transitions */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-bounce: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  /* Checkered background for transparency visualization */
+  /* Realistic CSS-based reflection effect for product photography */
+  .css-reflection-base {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 100%;
+    height: auto;
+    max-height: 60%;
+    transform: scaleY(-1);
+    transform-origin: top center;
+    opacity: 0.9;
+    object-fit: contain;
+    object-position: top;
+
+    /* Critical: The gradient mask that creates the fade */
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0.5) 0%,
+      rgba(0, 0, 0, 0.35) 20%,
+      rgba(0, 0, 0, 0.15) 50%,
+      rgba(0, 0, 0, 0.05) 80%,
+      rgba(0, 0, 0, 0) 100%
+    );
+
+    mask-image: linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0.5) 0%,
+      rgba(0, 0, 0, 0.35) 20%,
+      rgba(0, 0, 0, 0.15) 50%,
+      rgba(0, 0, 0, 0.05) 80%,
+      rgba(0, 0, 0, 0) 100%
+    );
+
+    filter: blur(4px) brightness(1.3) contrast(1.7) saturate(1.6);
+    pointer-events: none;
+  }
+
+  .bg-checkered {
+    background-image:
+      linear-gradient(45deg, hsl(var(--muted)) 25%, transparent 25%),
+      linear-gradient(-45deg, hsl(var(--muted)) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, hsl(var(--muted)) 75%),
+      linear-gradient(-45deg, transparent 75%, hsl(var(--muted)) 75%);
+    background-size: 20px 20px;
+    background-position:
+      0 0,
+      0 10px,
+      10px -10px,
+      -10px 0px;
+  }
+}
