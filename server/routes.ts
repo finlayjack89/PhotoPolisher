@@ -1,6 +1,12 @@
 import express, { type Request, type Response } from "express";
+import multer from "multer";
 import type { IStorage } from "./storage";
 import { insertUserQuotaSchema, insertProcessingCacheSchema, insertBackdropLibrarySchema, insertBatchImageSchema } from "@shared/schema";
+
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }
+});
 
 export function registerRoutes(app: express.Application, storage: IStorage) {
   
@@ -157,6 +163,35 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
     } catch (error) {
       console.error("Error in add-drop-shadow:", error);
       res.status(500).json({ error: error instanceof Error ? error.message : "Drop shadow failed" });
+    }
+  });
+
+  app.post("/api/analyze-backdrop", upload.single('backdrop'), async (req: Request, res: Response) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No backdrop image provided" });
+      }
+
+      const validMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+      if (!validMimeTypes.includes(req.file.mimetype)) {
+        return res.status(400).json({ error: "Invalid image format. Please upload JPEG, PNG, or WebP" });
+      }
+
+      const { analyzeBackdrop } = await import("./image-processing/analyze-images");
+      
+      const imageData = req.file.buffer.toString('base64');
+      const result = await analyzeBackdrop({
+        imageData,
+        mimeType: req.file.mimetype
+      });
+      
+      res.json(result);
+    } catch (error) {
+      console.error("Error in analyze-backdrop:", error);
+      res.status(500).json({ 
+        error: error instanceof Error ? error.message : "Backdrop analysis failed",
+        fallbackFloorY: 0.75
+      });
     }
   });
 
