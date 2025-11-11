@@ -71,12 +71,22 @@ export const BackdropUpload = ({ onUploadComplete }: BackdropUploadProps) => {
     try {
       // Get image dimensions
       const dimensions = await getImageDimensions(selectedFile);
+      setUploadProgress(30);
       
-      // TODO: Implement backdrop upload via API
-      setUploadProgress(50);
+      // Create FormData for upload
+      const formData = new FormData();
+      formData.append('image', selectedFile);
+      formData.append('userId', user.id);
+      formData.append('name', backdropName.trim());
+      formData.append('width', dimensions.width.toString());
+      formData.append('height', dimensions.height.toString());
       
-      // Simulate upload progress
-      await new Promise(resolve => setTimeout(resolve, 500));
+      setUploadProgress(60);
+      
+      // Upload via API
+      const { uploadBackdrop } = await import('@/lib/api-client');
+      await uploadBackdrop(formData);
+      
       setUploadProgress(100);
 
       toast({

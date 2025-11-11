@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { Trash2, ImageIcon, Download } from "lucide-react";
 import {
   AlertDialog,
@@ -19,11 +20,13 @@ import {
 
 interface Backdrop {
   id: string;
+  userId: string;
   name: string;
-  storage_path: string;
-  file_size: number;
-  dimensions: { width: number; height: number };
-  created_at: string;
+  storagePath: string;
+  width: number;
+  height: number;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 interface BackdropLibraryProps {
@@ -41,10 +44,41 @@ export const BackdropLibrary = ({
 }: BackdropLibraryProps) => {
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const { data: backdrops = [], isLoading: loading } = useQuery<Backdrop[]>({
-    queryKey: ['/api/backdrops', refreshTrigger],
+    queryKey: ['/api/backdrops', user?.id, refreshTrigger],
+    queryFn: async () => {
+      if (!user) return [];
+      const { getBackdrops } = await import('@/lib/api-client');
+      return getBackdrops(user.id);
+    },
+    enabled: !!user,
   });
+
+  // Load image URLs from memory storage
+  useEffect(() => {
+    const loadImages = async () => {
+      for (const backdrop of backdrops) {
+        if (!imageUrls[backdrop.id]) {
+          try {
+            const response = await fetch(`/api/get-memstorage-file?path=${encodeURIComponent(backdrop.storagePath)}`);
+            if (response.ok) {
+              const blob = await response.blob();
+              const url = URL.createObjectURL(blob);
+              setImageUrls(prev => ({ ...prev, [backdrop.id]: url }));
+            }
+          } catch (error) {
+            console.error(`Failed to load image for backdrop ${backdrop.id}:`, error);
+          }
+        }
+      }
+    };
+
+    if (backdrops.length > 0) {
+      loadImages();
+    }
+  }, [backdrops]);
 
   const handleDelete = async (id: string) => {
     try {
@@ -144,11 +178,8 @@ export const BackdropLibrary = ({
                   {backdrop.name}
                 </p>
                 <div className="flex items-center gap-2 mt-1">
-                  <Badge variant="secondary" className="text-xs" data-testid={`backdrop-size-${backdrop.id}`}>
-                    {(backdrop.file_size / (1024 * 1024)).toFixed(1)} MB
-                  </Badge>
                   <span className="text-xs text-gray-500 dark:text-gray-400" data-testid={`backdrop-dimensions-${backdrop.id}`}>
-                    {backdrop.dimensions.width}×{backdrop.dimensions.height}
+                    {backdrop.width}×{backdrop.height}
                   </span>
                 </div>
               </div>
