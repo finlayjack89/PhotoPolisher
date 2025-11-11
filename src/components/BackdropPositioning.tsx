@@ -6,11 +6,13 @@ import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Upload, Move, ArrowRight, AlertCircle, Zap, Library, Loader2, Sparkles } from "lucide-react";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Upload, Move, ArrowRight, AlertCircle, Zap, Library, Loader2, Sparkles, RefreshCw } from "lucide-react";
 import { SubjectPlacement } from "@/lib/canvas-utils";
 import { processAndCompressImage, getImageDimensions } from "@/lib/image-resize-utils";
 import { useToast } from "@/hooks/use-toast";
 import { BackdropLibrary } from "@/components/BackdropLibrary";
+import { api, analyzeBackdrop } from "@/lib/api-client";
 
 interface BackdropPositioningProps {
   originalImages: File[]; // Original uploaded files (before background removal)
@@ -42,9 +44,12 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   // TASK 5: Preview cutout state
   const [previewCutout, setPreviewCutout] = useState<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  const [retryPreview, setRetryPreview] = useState(0);
+  const [previewError, setPreviewError] = useState(false);
   
   // TASK 6: AI floor detection state
   const [floorY, setFloorY] = useState<number | null>(null);
+  const [isAnalyzingBackdrop, setIsAnalyzingBackdrop] = useState(false);
   
   // TASK 7: Master setup state
   const [masterPadding, setMasterPadding] = useState<number>(0.2); // 20%
@@ -69,43 +74,15 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
       if (originalImages.length === 0) return;
       
       setIsLoadingPreview(true);
+      setPreviewError(false);
       try {
         const firstImage = originalImages[0];
         
-        // Convert File to base64
-        const reader = new FileReader();
-        const imageData = await new Promise<string>((resolve, reject) => {
-          reader.onload = (e) => {
-            if (e.target?.result) {
-              const base64 = (e.target.result as string).split(',')[1];
-              resolve(base64);
-            } else {
-              reject(new Error('Failed to read file'));
-            }
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(firstImage);
-        });
+        // Use new file upload API
+        const result = await api.removeBackground(firstImage);
         
-        // Call background removal API
-        const response = await fetch('/api/remove-backgrounds', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            images: [imageData]
-          })
-        });
-        
-        if (!response.ok) {
-          throw new Error('Background removal failed');
-        }
-        
-        const result = await response.json();
-        
-        if (result.processedImages && result.processedImages.length > 0) {
-          setPreviewCutout(result.processedImages[0]);
+        if (result.images && result.images.length > 0 && result.images[0].processedImageUrl) {
+          setPreviewCutout(result.images[0].processedImageUrl);
           toast({
             title: "Preview Ready",
             description: "Background removed from preview image",
@@ -115,6 +92,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         }
       } catch (error) {
         console.error('Error generating preview cutout:', error);
+        setPreviewError(true);
         toast({
           title: "Preview Generation Failed",
           description: "Could not generate preview cutout. Please try again.",
@@ -126,7 +104,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     };
     
     generatePreviewCutout();
-  }, [originalImages, toast]);
+  }, [originalImages, toast, retryPreview]);
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes';
@@ -203,35 +181,29 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   };
 
   // TASK 6: AI backdrop analysis
-  const analyzeBackdrop = async (file: File) => {
+  const analyzeBackdropImage = async (file: File) => {
+    setIsAnalyzingBackdrop(true);
     try {
       const formData = new FormData();
       formData.append('backdrop', file);
       
-      const response = await fetch('/api/analyze-backdrop', {
-        method: 'POST',
-        body: formData
-      });
+      const analysis = await analyzeBackdrop(formData);
       
-      if (!response.ok) {
-        throw new Error('Backdrop analysis failed');
-      }
-      
-      const result = await response.json();
-      
-      if (result.floorY !== undefined && result.floorY !== null) {
-        setFloorY(result.floorY);
+      if (analysis.floorY !== undefined && analysis.floorY !== null) {
+        setFloorY(analysis.floorY);
         // Auto-update placement.y to AI-detected floor position
-        setPlacement(prev => ({ ...prev, y: result.floorY }));
+        setPlacement(prev => ({ ...prev, y: analysis.floorY }));
         
         toast({
           title: "AI Floor Detected",
-          description: `Floor position: ${Math.round(result.floorY * 100)}%`,
+          description: `Floor position: ${Math.round(analysis.floorY * 100)}%`,
         });
       }
     } catch (error) {
       console.error('Error analyzing backdrop:', error);
       // Silent fail - floor detection is optional
+    } finally {
+      setIsAnalyzingBackdrop(false);
     }
   };
 
@@ -270,7 +242,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         }
         
         // TASK 6: Analyze backdrop for AI floor detection
-        await analyzeBackdrop(file);
+        await analyzeBackdropImage(file);
       } catch (error) {
         console.error('Error analyzing backdrop:', error);
         toast({
@@ -486,7 +458,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                               reader.readAsDataURL(blob);
                               
                               // Analyze the backdrop
-                              await analyzeBackdrop(file);
+                              await analyzeBackdropImage(file);
                             } catch (error) {
                               console.error('Error loading backdrop from library:', error);
                               toast({
@@ -504,7 +476,13 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
               </div>
 
               {/* TASK 6: AI Floor Detection Indicator */}
-              {floorY !== null && (
+              {isAnalyzingBackdrop && (
+                <div className="bg-primary/5 p-3 rounded-lg flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 text-primary animate-spin" />
+                  <span className="text-sm font-medium">Analyzing backdrop with AI...</span>
+                </div>
+              )}
+              {floorY !== null && !isAnalyzingBackdrop && (
                 <div className="bg-primary/5 p-3 rounded-lg flex items-center gap-2">
                   <Sparkles className="h-4 w-4 text-primary" />
                   <span className="text-sm font-medium">AI Floor Detection Active</span>
@@ -535,7 +513,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
 
                   {/* TASK 7: Master Padding Slider */}
                   <div className="space-y-2">
-                    <Label>Output Padding</Label>
+                    <Label>Padding</Label>
                     <Slider
                       value={[masterPadding]}
                       onValueChange={(value) => setMasterPadding(value[0])}
@@ -546,27 +524,33 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                       data-testid="slider-master-padding"
                     />
                     <div className="text-xs text-muted-foreground text-center">
-                      {Math.round(masterPadding * 100)}% padding around subject
+                      {(masterPadding * 100).toFixed(0)}% padding around subject
                     </div>
                   </div>
 
-                  {/* TASK 7: Aspect Ratio Select */}
+                  {/* TASK 7: Aspect Ratio ToggleGroup */}
                   <div className="space-y-2">
                     <Label>Output Aspect Ratio</Label>
-                    <Select 
+                    <ToggleGroup 
+                      type="single"
                       value={masterAspectRatio} 
-                      onValueChange={setMasterAspectRatio}
+                      onValueChange={(value) => value && setMasterAspectRatio(value)}
+                      className="grid grid-cols-2 gap-2"
+                      data-testid="togglegroup-aspect-ratio"
                     >
-                      <SelectTrigger data-testid="select-aspect-ratio">
-                        <SelectValue placeholder="Select aspect ratio" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="original" data-testid="aspect-original">Original</SelectItem>
-                        <SelectItem value="1:1" data-testid="aspect-1-1">1:1 (Square)</SelectItem>
-                        <SelectItem value="4:3" data-testid="aspect-4-3">4:3 (Landscape)</SelectItem>
-                        <SelectItem value="3:4" data-testid="aspect-3-4">3:4 (Portrait)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      <ToggleGroupItem value="original" className="w-full" data-testid="aspect-original">
+                        Original
+                      </ToggleGroupItem>
+                      <ToggleGroupItem value="1:1" className="w-full" data-testid="aspect-1-1">
+                        1:1
+                      </ToggleGroupItem>
+                      <ToggleGroupItem value="4:3" className="w-full" data-testid="aspect-4-3">
+                        4:3
+                      </ToggleGroupItem>
+                      <ToggleGroupItem value="3:4" className="w-full" data-testid="aspect-3-4">
+                        3:4
+                      </ToggleGroupItem>
+                    </ToggleGroup>
                     <div className="text-xs text-muted-foreground">
                       Applies to all output images in batch
                     </div>
@@ -583,13 +567,13 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
 
               {/* Processing Info */}
               <div className="bg-primary/5 p-4 rounded-lg">
-                <h4 className="font-medium mb-2">Batch Processing Info:</h4>
+                <h4 className="font-medium mb-2">Master Setup Summary:</h4>
                 <div className="text-sm text-muted-foreground space-y-1">
                   <div>• Total images to process: {originalImages.length}</div>
                   <div>• Backdrop: {backdrop ? "✓ Ready" : "⚠ Required"}</div>
                   <div>• Preview: {previewCutout ? "✓ Generated" : isLoadingPreview ? "⏳ Generating..." : "⚠ Loading"}</div>
-                  <div>• Padding: {Math.round(masterPadding * 100)}%</div>
-                  <div>• Aspect Ratio: {masterAspectRatio}</div>
+                  <div>• Padding: <span className="font-medium" data-testid="text-padding-value">{(masterPadding * 100).toFixed(0)}%</span></div>
+                  <div>• Aspect Ratio: <span className="font-medium" data-testid="text-aspect-value">{masterAspectRatio}</span></div>
                   {floorY !== null && (
                     <div>• AI Floor Detection: ✓ Active ({Math.round(floorY * 100)}%)</div>
                   )}
@@ -614,6 +598,26 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                     <p className="text-muted-foreground">
                       Generating preview cutout...
                     </p>
+                  </div>
+                </div>
+              ) : previewError ? (
+                <div className="flex items-center justify-center h-[500px] bg-muted/20 rounded-lg border-2 border-dashed">
+                  <div className="text-center space-y-4">
+                    <AlertCircle className="h-12 w-12 mx-auto mb-2 text-destructive" />
+                    <div>
+                      <p className="font-medium text-destructive mb-1">Preview Generation Failed</p>
+                      <p className="text-sm text-muted-foreground">
+                        Could not generate preview cutout
+                      </p>
+                    </div>
+                    <Button 
+                      onClick={() => setRetryPreview(prev => prev + 1)}
+                      variant="outline"
+                      data-testid="button-retry-preview"
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Retry Preview
+                    </Button>
                   </div>
                 </div>
               ) : backdrop && previewCutout ? (
