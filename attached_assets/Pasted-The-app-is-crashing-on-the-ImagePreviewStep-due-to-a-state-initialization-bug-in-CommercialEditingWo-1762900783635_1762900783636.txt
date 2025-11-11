@@ -1,0 +1,171 @@
+The app is crashing on the ImagePreviewStep due to a state initialization bug in CommercialEditingWorkflow.tsx. Furthermore, the background removal API is failing due to a wrong API key, and the backdrop library is non-functional.
+
+We will fix all bugs by implementing the "AI-Assisted Setup, Subject-Centric Batch" architecture.
+
+Phase 1: Fix the Immediate Crash & Workflow
+
+Open: src/components/CommercialEditingWorkflow.tsx.
+
+Delete: Remove the useEffect hook (lines 33-35) and the analyzeImages function (lines 52-68).
+
+Fix State Initialization (This stops the crash):
+
+Change line 22 (workflowFiles) to initialize from the files prop:
+
+TypeScript
+
+const [workflowFiles, setWorkflowFiles] = useState<FileWithOriginalSize[]>(
+  files.map(f => ({ ...f, name: f.name, size: f.size, type: f.type, originalSize: f.size, isPreCut: f.isPreCut }))
+);
+Change line 24 (analysisResults) to derive data from the files prop:
+
+TypeScript
+
+const [analysisResults, setAnalysisResults] = useState<AnalysisResult[]>(
+  files.map(f => ({
+    originalName: f.name,
+    originalSize: (f as FileWithOriginalSize).originalSize || f.size,
+    compressedSize: f.size,
+    compressionRatio: (f as FileWithOriginalSize).originalSize ? `${Math.round(100 - (f.size / (f as FileWithOriginalSize).originalSize!) * 100)}%` : '0%',
+    qualityPercentage: 92 
+  }))
+);
+Fix handleAnalysisComplete: This function no longer receives data. It just advances the step.
+
+TypeScript
+
+const handleAnalysisComplete = () => {
+  const allPreCut = workflowFiles.every(file => file.isPreCut);
+  if (allPreCut) {
+    setCurrentStep('precut-positioning');
+  } else {
+    setCurrentStep('background-removal');
+  }
+};
+Fix ImagePreviewStep Props:
+
+In the analysis step render (line 72), change onContinue to handleAnalysisComplete:
+
+TypeScript
+
+<ImagePreviewStep
+  files={workflowFiles}
+  onContinue={handleAnalysisComplete} // Fix: Pass the correct function
+  onBack={onBack}
+  wasCompressed={true}
+  compressionData={analysisResults} // Fix: Pass the state array
+/>
+Remove Redundant Steps:
+
+In the WorkflowStep type (line 15), remove 'rotation' and 'shadow-generation'.
+
+In the render logic, delete the case blocks for rotation (line 100) and shadow-generation (line 129).
+
+Phase 2: Fix Server-Side Bugs (API Key & File Uploads)
+
+Fix API Key: In server/image-processing/remove-backgrounds.ts, change all instances of REPLICATE_API_TOKEN to REPLICATE_API_KEY (lines 10, 14, 46, 54).
+
+Install multer types: Run npm i -D @types/multer.
+
+Update server/routes.ts:
+
+Import multer and configure it at the top:
+
+TypeScript
+
+import multer from 'multer';
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 } // 25MB limit
+});
+Apply upload.single('image') as middleware to /api/remove-backgrounds, /api/backdrops (POST), and create a new route: /api/analyze-backdrop (POST).
+
+Update the /api/remove-backgrounds route to read from req.file.buffer.
+
+Update the /api/backdrops (POST) route to read req.file and req.body to save to storage.
+
+Update server/storage.ts:
+
+Add saveFileToMemStorage(path, mimeType, buffer) and getFileFromMemStorage(path) to the IStorage interface and MemStorage class.
+
+Update server/index.ts:
+
+Add a new GET route /api/get-memstorage-file to serve files from storage.getFileFromMemStorage.
+
+Phase 3: Fix Backdrop Library (Make it functional)
+
+Update src/lib/api-client.ts:
+
+Add the apiUpload function (for FormData).
+
+Create removeBackground(file: File) (singular) which uses apiUpload to call /api/remove-backgrounds.
+
+Create uploadBackdrop(formData: FormData).
+
+Create getBackdrops(userId: string).
+
+Create analyzeBackdrop(formData: FormData).
+
+Update src/components/BackdropUpload.tsx:
+
+In handleUpload, get image dimensions, create a FormData object with image, userId, name, width, and height, and call await api.uploadBackdrop(formData). Remove the // TODO: and setTimeout.
+
+Update src/components/BackdropLibrary.tsx:
+
+Inject useAuth and api.
+
+Fix the useQuery to call api.getBackdrops(user!.id) and set enabled: !!user.
+
+Add a useEffect to fetch blob URLs from /api/get-memstorage-file for each backdrop and populate the imageUrls state.
+
+Phase 4: Implement "Master Setup" UI
+
+Refactor src/components/BackdropPositioning.tsx:
+
+Add the allSubjects and isPreCut props.
+
+Add state for previewCutout, masterPadding, and masterAspectRatio.
+
+In a useEffect, fix the logic:
+
+If isPreCut, read allSubjects[0] as a data URL.
+
+If !isPreCut, allSubjects is ProcessedSubject[]. Get the data directly: setPreviewCutout(allSubjects[0].backgroundRemovedData).
+
+In handleBackdropUpload, call api.analyzeBackdrop and use the result to setPlacement (the "AI Snap").
+
+Replace the "Product Size" slider with the "Padding" slider and "Aspect Ratio" toggles.
+
+Update onPositioningComplete to pass the new master rules.
+
+Phase 5: Implement "Waiting Room" & Fix Compositing
+
+Refactor src/components/CommercialEditingWorkflow.tsx:
+
+Modify handlePositioningComplete to save the master rules (backdrop, placement, etc.) to state and set currentStep('batch-processing').
+
+Render <BatchProcessingStep /> when currentStep === 'batch-processing'.
+
+Create src/components/BatchProcessingStep.tsx:
+
+This component receives subjects, backdrop, and masterRules.
+
+It must contain the one-by-one async loop that, for each file:
+
+Gets the cleanCutoutData (either from the prop or by calling api.removeBackground if isPreCut).
+
+Calls api.addDropShadow.
+
+Calculates the final outputCanvasSize (new client-side util).
+
+Calls the compositeLayers function.
+
+Updates a progress bar and handles errors for individual files.
+
+Fix src/lib/canvas-utils.ts:
+
+Modify compositeLayers to accept outputCanvasSize: { width, height }.
+
+Implement the backdrop "zoom/crop" logic (like background-size: cover).
+
+Fix the reflection bug by drawing the cleanSubjectUrl relative to the final subject position on the final canvas.
