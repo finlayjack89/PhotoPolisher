@@ -60,7 +60,10 @@ export class MemStorage implements IStorage {
     const now = new Date();
     const newQuota: UserQuota = {
       id,
-      ...quota,
+      userId: quota.userId,
+      monthlyLimit: quota.monthlyLimit ?? 100,
+      currentUsage: quota.currentUsage ?? 0,
+      resetDate: quota.resetDate ?? new Date(new Date().setMonth(new Date().getMonth() + 1)),
       createdAt: now,
       updatedAt: now,
     };
@@ -107,7 +110,14 @@ export class MemStorage implements IStorage {
     const now = new Date();
     const newCache: ProcessingCache = {
       id,
-      ...cache,
+      cacheKey: cache.cacheKey,
+      originalUrl: cache.originalUrl,
+      processedUrl: cache.processedUrl,
+      operation: cache.operation,
+      optionsHash: cache.optionsHash,
+      hitCount: cache.hitCount ?? 0,
+      lastAccessed: cache.lastAccessed ?? now,
+      expiresAt: cache.expiresAt,
       createdAt: now,
     };
     this.processingCache.set(id, newCache);
@@ -118,7 +128,9 @@ export class MemStorage implements IStorage {
     const id = crypto.randomUUID();
     const newHealth: SystemHealth = {
       id,
-      ...health,
+      metricName: health.metricName,
+      metricValue: health.metricValue,
+      metadata: health.metadata ?? {},
       recordedAt: new Date(),
     };
     this.systemHealth.push(newHealth);
@@ -140,7 +152,11 @@ export class MemStorage implements IStorage {
     const now = new Date();
     const newBackdrop: BackdropLibrary = {
       id,
-      ...backdrop,
+      userId: backdrop.userId,
+      name: backdrop.name,
+      storagePath: backdrop.storagePath,
+      width: backdrop.width ?? 1920,
+      height: backdrop.height ?? 1080,
       createdAt: now,
       updatedAt: now,
     };
@@ -171,7 +187,13 @@ export class MemStorage implements IStorage {
     const id = crypto.randomUUID();
     const newImage: BatchImage = {
       id,
-      ...image,
+      batchId: image.batchId,
+      name: image.name,
+      imageType: image.imageType,
+      storagePath: image.storagePath,
+      fileSize: image.fileSize,
+      dimensions: image.dimensions ?? { width: 0, height: 0 },
+      sortOrder: image.sortOrder ?? 0,
       createdAt: new Date(),
     };
     this.batchImages.set(id, newImage);

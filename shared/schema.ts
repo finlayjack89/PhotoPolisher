@@ -44,7 +44,7 @@ export const systemHealth = pgTable('system_health', {
   id: uuid('id').defaultRandom().primaryKey(),
   metricName: text('metric_name').notNull(),
   metricValue: integer('metric_value').notNull(),
-  metadata: jsonb('metadata').default({}).notNull(),
+  metadata: jsonb('metadata').notNull().default({}),
   recordedAt: timestamp('recorded_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -55,11 +55,11 @@ export type SystemHealth = typeof systemHealth.$inferSelect;
 // Backdrop Library Table
 export const backdropLibrary = pgTable('backdrop_library', {
   id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id').notNull(),
+  userId: text('user_id').notNull(),
   name: text('name').notNull(),
   storagePath: text('storage_path').notNull(),
-  fileSize: integer('file_size'),
-  dimensions: jsonb('dimensions'),
+  width: integer('width').notNull().default(1920),
+  height: integer('height').notNull().default(1080),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });

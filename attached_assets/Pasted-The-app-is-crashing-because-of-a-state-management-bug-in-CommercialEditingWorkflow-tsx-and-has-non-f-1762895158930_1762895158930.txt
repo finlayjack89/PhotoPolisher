@@ -1,0 +1,173 @@
+The app is crashing because of a state management bug in CommercialEditingWorkflow.tsx and has non-functional placeholder components. We need to fix the crash and implement the full "AI-Assisted Setup, Subject-Centric Batch" workflow.
+
+Phase 1: Fix the Immediate Crash in CommercialEditingWorkflow.tsx
+
+Open: src/components/CommercialEditingWorkflow.tsx.
+
+Delete: Remove the entire useEffect hook (lines 33-35) and the entire analyzeImages function (lines 52-68). They are redundant and causing the crash.
+
+Fix State Initialization:
+
+Change line 22 from useState<...[]>([]); to initialize directly from the files prop:
+
+TypeScript
+
+const [workflowFiles, setWorkflowFiles] = useState<FileWithOriginalSize[]>(
+  files.map(f => ({ ...f, originalSize: f.size }))
+);
+Change line 24 to derive analysisResults (which is just compression data) directly from the files prop:
+
+TypeScript
+
+const [analysisResults, setAnalysisResults] = useState<AnalysisResult[]>(
+  files.map(f => ({
+    originalName: f.name,
+    originalSize: (f as FileWithOriginalSize).originalSize || f.size,
+    compressedSize: f.size,
+    compressionRatio: (f as FileWithOriginalSize).originalSize ? `${Math.round(100 - (f.size / (f as FileWithOriginalSize).originalSize!) * 100)}%` : '0%',
+    qualityPercentage: 92 // This is a static value from the compression utility
+  }))
+);
+Fix handleAnalysisComplete: This function no longer receives analysisData. It should now just advance the step:
+
+TypeScript
+
+const handleAnalysisComplete = () => {
+  const allPreCut = workflowFiles.every(file => file.isPreCut);
+  if (allPreCut) {
+    setCurrentStep('precut-positioning');
+  } else {
+    setCurrentStep('background-removal');
+  }
+};
+Fix ImagePreviewStep props:
+
+In the analysis step render (line 72), onContinue should be handleAnalysisComplete:
+
+TypeScript
+
+return (
+  <ImagePreviewStep
+    files={workflowFiles}
+    onContinue={handleAnalysisComplete} // Use the new function
+    onBack={onBack}
+    wasCompressed={true}
+    compressionData={analysisResults} // Pass the state
+  />
+);
+Remove Redundant Steps:
+
+In the WorkflowStep type, remove 'rotation' and 'shadow-generation'.
+
+In the render logic, delete the case blocks for rotation and shadow-generation.
+
+Phase 2: Fix Server-Side Bugs (API Key & File Uploads)
+
+Fix API Key: In server/image-processing/remove-backgrounds.ts, change all instances of REPLICATE_API_TOKEN to REPLICATE_API_KEY.
+
+Install multer types: Run npm i -D @types/multer.
+
+Update server/routes.ts:
+
+Import multer and configure it:
+
+TypeScript
+
+import multer from 'multer';
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 } // 25MB limit
+});
+Apply upload.single('image') as middleware to /api/remove-backgrounds, and create new routes for /api/backdrops (POST) and /api/analyze-backdrop (POST), also with upload.single('image').
+
+Update the /api/remove-backgrounds logic to read from req.file.buffer.
+
+Update the /api/backdrops (POST) logic to read req.file and req.body to save to storage.
+
+Update server/storage.ts:
+
+Add saveFileToMemStorage(path, mimeType, buffer) and getFileFromMemStorage(path) to the IStorage interface and MemStorage class.
+
+Update server/index.ts:
+
+Add a new GET route /api/get-memstorage-file to serve files from storage.getFileFromMemStorage.
+
+Phase 3: Fix Backdrop Library (Make it functional)
+
+Update src/lib/api-client.ts:
+
+Add the apiUpload function (for FormData).
+
+Add removeBackground(file: File) (singular) which uses apiUpload to call /api/remove-backgrounds.
+
+Add uploadBackdrop(formData: FormData).
+
+Add getBackdrops(userId: string).
+
+Add analyzeBackdrop(formData: FormData).
+
+Update src/components/BackdropUpload.tsx:
+
+In handleUpload, get image dimensions, create a FormData object with image, userId, name, width, and height, and call await api.uploadBackdrop(formData). Remove the // TODO: and setTimeout.
+
+Update src/components/BackdropLibrary.tsx:
+
+Inject useAuth and api.
+
+Fix the useQuery to call api.getBackdrops(user!.id) and enabled: !!user.
+
+Add a useEffect to fetch blob URLs from /api/get-memstorage-file for each backdrop and populate the imageUrls state.
+
+Phase 4: Implement "Master Setup" UI
+
+Refactor src/components/CommercialEditingWorkflow.tsx:
+
+This component will now manage the "waiting room" loop.
+
+Modify handlePositioningComplete to save the master rules (backdrop, placement, padding, aspectRatio) to state and set currentStep('batch-processing').
+
+Render a new component, <BatchProcessingStep />, when currentStep === 'batch-processing'.
+
+Create src/components/BatchProcessingStep.tsx:
+
+This new component receives the full list of subjects, backdrop, and master rules.
+
+It must contain the one-by-one async loop that, for each file:
+
+Calls api.removeBackground (if not pre-cut).
+
+Calls api.addDropShadow.
+
+Calculates the final outputCanvasSize (using a new client-side util calculateCanvasSize).
+
+Calls the compositeLayers function.
+
+Updates a progress bar and handles errors for individual files.
+
+Calls onComplete(results) when the loop is finished.
+
+Refactor src/components/BackdropPositioning.tsx:
+
+Add the allSubjects and isPreCut props.
+
+Add state for previewCutout, masterPadding, and masterAspectRatio.
+
+In a useEffect, call api.removeBackground(allSubjects[0]) to get the previewCutout.
+
+In handleBackdropUpload, call api.analyzeBackdrop and use the result to setPlacement (the "AI Snap").
+
+Replace the "Product Size" slider with the "Padding" slider and "Aspect Ratio" toggles.
+
+Call onPositioningComplete with all the new master rules.
+
+Phase 5: Fix Final Compositing (Canvas & Reflections)
+
+Fix src/lib/canvas-utils.ts:
+
+Modify the compositeLayers function signature to accept outputCanvasSize: { width: number; height: number }.
+
+Fix Crop: Set the canvas size to outputCanvasSize. Draw the backdrop using 9-argument drawImage to crop and scale it to fill the canvas (like background-size: cover), aligning the floor with placement.y.
+
+Fix Placement: Calculate the subject's (dx, dy) position based on the outputCanvasSize and masterPadding.
+
+Fix Reflection: Draw the cleanSubjectUrl (flipped) relative to the subject's new position on the final canvas. This permanently fixes the misalignment bug.

@@ -52,30 +52,36 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const processImageWithRetry = async (image: {data: string, name: string, originalSize: number}, maxRetries = 3): Promise<ProcessedImage | null> => {
+  const processImageWithRetry = async (file: File, maxRetries = 3): Promise<ProcessedImage | null> => {
     let lastError: any = null;
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        console.log(`Processing ${image.name} - Attempt ${attempt}/${maxRetries}`);
+        console.log(`Processing ${file.name} - Attempt ${attempt}/${maxRetries}`);
         
-        const result = await api.removeBackgrounds({ 
-          images: [{ data: image.data, name: image.name }] 
-        });
+        // Use new file upload API
+        const result = await api.removeBackground(file);
 
         if (result?.images && result.images.length > 0) {
+          // Read original file as data URL for originalData
+          const originalDataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(file);
+          });
+
           return {
             name: result.images[0].name,
-            originalData: image.data,
+            originalData: originalDataUrl,
             backgroundRemovedData: result.images[0].transparentData,
             size: result.images[0].size || 0,
-            originalSize: image.originalSize
+            originalSize: file.size
           };
         } else {
           lastError = new Error('No results returned');
           if (attempt < maxRetries) {
             const delay = Math.pow(2, attempt - 1) * 1000;
-            console.log(`Retrying ${image.name} in ${delay}ms...`);
+            console.log(`Retrying ${file.name} in ${delay}ms...`);
             await new Promise(resolve => setTimeout(resolve, delay));
             continue;
           }
@@ -84,7 +90,7 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
         lastError = error;
         if (attempt < maxRetries) {
           const delay = Math.pow(2, attempt - 1) * 1000;
-          console.log(`Retrying ${image.name} in ${delay}ms...`);
+          console.log(`Retrying ${file.name} in ${delay}ms...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
@@ -97,52 +103,44 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
     setIsProcessingLocal(true);
     setProgress(0);
     setFailedImages([]);
-    setCurrentProcessingStep('Converting images...');
+    setCurrentProcessingStep('Preparing images...');
 
     try {
-      // Convert files to base64 and store original sizes
-      const imageData = await Promise.all(
-        files.map(async (file) => {
-          const reader = new FileReader();
-          return new Promise<{ data: string; name: string; originalSize: number }>((resolve) => {
-            reader.onload = () => resolve({
-              data: reader.result as string,
-              name: file.name,
-              originalSize: file.size
-            });
-            reader.readAsDataURL(file);
-          });
-        })
-      );
-
-      setProgress(20);
+      setProgress(10);
       setCurrentProcessingStep('Removing backgrounds...');
 
-      // Process images one by one to avoid CPU timeouts
+      // Process images one by one using new file upload API
       const allResults: ProcessedImage[] = [];
       const failed: {name: string, error: string, data: string, originalSize: number}[] = [];
       
-      for (let i = 0; i < imageData.length; i++) {
-        const image = imageData[i];
-        const imageProgress = ((i / imageData.length) * 80) + 20; // 20-100% range
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const imageProgress = ((i / files.length) * 80) + 10; // 10-90% range
         
-        setCurrentProcessingStep(`Processing image ${i + 1} of ${imageData.length}: ${image.name}...`);
+        setCurrentProcessingStep(`Processing image ${i + 1} of ${files.length}: ${file.name}...`);
         setProgress(imageProgress);
 
-        const result = await processImageWithRetry(image);
+        const result = await processImageWithRetry(file);
         
         if (result) {
           allResults.push(result);
         } else {
+          // Read failed file as data URL for retry
+          const failedDataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(file);
+          });
+
           failed.push({
-            name: image.name,
+            name: file.name,
             error: 'Failed after 3 attempts',
-            data: image.data,
-            originalSize: image.originalSize
+            data: failedDataUrl,
+            originalSize: file.size
           });
           toast({
             title: "Processing Failed",
-            description: `${image.name} failed after 3 attempts. You can retry individual images.`,
+            description: `${file.name} failed after 3 attempts. You can retry individual images.`,
             variant: "destructive",
           });
         }
@@ -172,11 +170,11 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
   const retryFailedImage = async (failedImage: {name: string, error: string, data: string, originalSize: number}) => {
     setCurrentProcessingStep(`Retrying ${failedImage.name}...`);
     
-    const result = await processImageWithRetry({
-      data: failedImage.data,
-      name: failedImage.name,
-      originalSize: failedImage.originalSize
-    });
+    // Convert data URL back to File for retry
+    const blob = await fetch(failedImage.data).then(r => r.blob());
+    const file = new File([blob], failedImage.name, { type: blob.type });
+    
+    const result = await processImageWithRetry(file);
     
     if (result) {
       // Move from failed to processed

@@ -46,7 +46,7 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   res.status(500).json({ error: err.message || "Internal server error" });
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = Number(process.env.PORT) || 5000;
 
 async function startServer() {
   await setupVite(app);
