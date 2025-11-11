@@ -14,7 +14,20 @@ interface CommercialEditingWorkflowProps {
   onBack: () => void;
 }
 
-type WorkflowStep = 'analysis' | 'background-removal' | 'positioning' | 'batch-processing' | 'complete';
+type WorkflowStep = 'analysis' | 'background-removal' | 'precut-positioning' | 'positioning' | 'batch-processing' | 'complete';
+
+interface FileWithOriginalSize extends File {
+  originalSize?: number;
+  isPreCut?: boolean;
+}
+
+interface AnalysisResult {
+  originalName: string;
+  originalSize: number;
+  compressedSize: number;
+  compressionRatio: string;
+  qualityPercentage: number;
+}
 
 interface ProcessedImages {
   backgroundRemoved: Array<{ name: string; originalData: string; backgroundRemovedData: string; size: number; }>;
@@ -29,54 +42,67 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
   files,
   onBack
 }) => {
+  // Initialize state from files prop to prevent crash
+  // IMPORTANT: Keep actual File objects, just add metadata properties
+  const [workflowFiles, setWorkflowFiles] = useState<FileWithOriginalSize[]>(
+    files.map(f => {
+      // Preserve the File object by using Object.assign instead of spread
+      const fileWithMetadata = Object.assign(f, {
+        originalSize: f.size,
+        isPreCut: f.isPreCut || false
+      });
+      return fileWithMetadata as FileWithOriginalSize;
+    })
+  );
+  
+  const [analysisResults, setAnalysisResults] = useState<AnalysisResult[]>(
+    files.map(f => ({
+      originalName: f.name,
+      originalSize: (f as FileWithOriginalSize).originalSize || f.size,
+      compressedSize: f.size,
+      compressionRatio: (f as FileWithOriginalSize).originalSize 
+        ? `${Math.round(100 - (f.size / (f as FileWithOriginalSize).originalSize!) * 100)}%` 
+        : '0%',
+      qualityPercentage: 92
+    }))
+  );
+  
   const [currentStep, setCurrentStep] = useState<WorkflowStep>('analysis');
   const [processedImages, setProcessedImages] = useState<ProcessedImages>({ backgroundRemoved: [] });
   const [processedSubjects, setProcessedSubjects] = useState<any[]>([]);
   const { toast } = useToast();
 
-  // Analyze images on component mount
-  React.useEffect(() => {
-    analyzeImages();
-  }, []);
-
-  // Batch processing is now handled by BatchProcessingStep component
-
-  const analyzeImages = () => {
-    // Check if all images are pre-cut (transparent backgrounds already removed)
-    const allPreCut = files.every(file => file.isPreCut);
-
+  // Handle analysis step completion - just advances to next step
+  const handleAnalysisComplete = async () => {
+    const allPreCut = workflowFiles.every(file => file.isPreCut);
     if (allPreCut) {
-      console.log('All images are pre-cut, skipping to positioning step');
-      // Convert files to processed image format
-      const preCutImages = files.map(file => ({
-        name: file.name,
-        originalData: '',
-        backgroundRemovedData: '',
-        size: file.size
-      }));
-      
-      // Load file data for positioning step
-      Promise.all(files.map(file => {
-        return new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = (e) => resolve(e.target?.result as string);
-          reader.readAsDataURL(file);
-        });
-      })).then(dataUrls => {
-        const processedPreCutImages = preCutImages.map((img, index) => ({
-          ...img,
-          originalData: dataUrls[index],
-          backgroundRemovedData: dataUrls[index]
+      // Convert Files to ProcessedSubject format for pre-cut images
+      try {
+        const precutSubjects = await Promise.all(workflowFiles.map(async (file) => {
+          const dataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target?.result as string);
+            reader.readAsDataURL(file);
+          });
+          
+          return {
+            name: file.name,
+            originalData: dataUrl,
+            backgroundRemovedData: dataUrl, // For pre-cut, original = background removed
+            size: file.size,
+            originalSize: file.size
+          };
         }));
-        setProcessedImages({ backgroundRemoved: processedPreCutImages });
-        setCurrentStep('positioning');
-      });
-      return;
+        
+        setProcessedSubjects(precutSubjects);
+        setProcessedImages({ backgroundRemoved: precutSubjects });
+      } catch (error) {
+        console.error("Error loading pre-cut images:", error);
+      }
+      setCurrentStep('precut-positioning');
+    } else {
+      setCurrentStep('background-removal');
     }
-
-    // Images are now pre-processed during upload to be 2048px max and under 5MB
-    // Go directly to background removal
-    setCurrentStep('background-removal');
   };
 
   const handleBackgroundRemovalComplete = (subjects: any[]) => {
@@ -84,10 +110,11 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
     setProcessedSubjects(subjects);
     
     // Populate processedImages.backgroundRemoved for the gallery
+    // BackgroundRemovalStep returns ProcessedImage objects with originalData and backgroundRemovedData
     const backgroundRemovedImages = subjects.map((subject) => ({
-      name: subject.original_filename || subject.name || 'Image',
-      originalData: subject.originalImageUrl || '',
-      backgroundRemovedData: subject.backgroundRemovedData || subject.processedImageUrl || '',
+      name: subject.name || 'Image',
+      originalData: subject.originalData || '',
+      backgroundRemovedData: subject.backgroundRemovedData || '',
       size: subject.size || 0
     }));
     
@@ -124,13 +151,21 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
 
 
   if (currentStep === 'analysis') {
-    return null; // Auto-analysis in useEffect
+    return (
+      <ImagePreviewStep
+        files={workflowFiles}
+        onContinue={handleAnalysisComplete}
+        onBack={onBack}
+        wasCompressed={true}
+        compressionData={analysisResults}
+      />
+    );
   }
 
   if (currentStep === 'background-removal') {
     return (
       <BackgroundRemovalStep
-        files={files}
+        files={workflowFiles}
         onProcessingComplete={handleBackgroundRemovalComplete}
         onContinue={handleBackgroundRemovalComplete}
         onBack={onBack}
@@ -138,11 +173,32 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
     );
   }
 
-  if (currentStep === 'positioning') {
-    // BackdropPositioning now accepts originalImages and generates preview cutout internally
+  if (currentStep === 'precut-positioning') {
+    // Pre-cut images are now converted to ProcessedSubject format in handleAnalysisComplete
+    // Pass isPreCut=false because we've already converted to ProcessedSubject objects
     return (
       <BackdropPositioning
-        originalImages={files}
+        allSubjects={processedSubjects}
+        isPreCut={false}
+        onPositioningComplete={handlePositioningComplete}
+        onBack={() => setCurrentStep('analysis')}
+      />
+    );
+  }
+
+  if (currentStep === 'positioning') {
+    // BackdropPositioning expects processed subjects - always use processedSubjects
+    // If processedSubjects is empty, workflow should not reach this step
+    if (processedSubjects.length === 0) {
+      console.error("positioning step reached with no processedSubjects");
+      setCurrentStep('background-removal');
+      return null;
+    }
+    
+    return (
+      <BackdropPositioning
+        allSubjects={processedSubjects}
+        isPreCut={false}
         onPositioningComplete={handlePositioningComplete}
         onBack={() => setCurrentStep('background-removal')}
       />
@@ -157,17 +213,27 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
         description: "Please complete the master setup before batch processing",
         variant: "destructive"
       });
-      setCurrentStep('positioning');
+      const allPreCut = workflowFiles.every(file => file.isPreCut);
+      setCurrentStep(allPreCut ? 'precut-positioning' : 'positioning');
       return null;
     }
 
+    // Always use processedSubjects for batch processing
+    // isPreCut should be based on whether we went through background removal step
+    const wentThroughBackgroundRemoval = currentStep === 'batch-processing' && 
+      processedSubjects.length > 0 && 
+      processedSubjects[0].originalData !== processedSubjects[0].backgroundRemovedData;
+    
     return (
       <BatchProcessingStep
-        files={files}
+        subjects={processedSubjects}
         backdrop={processedImages.backdrop}
-        masterPlacement={processedImages.placement}
-        masterPadding={processedImages.masterPadding}
-        masterAspectRatio={processedImages.masterAspectRatio}
+        masterRules={{
+          placement: processedImages.placement,
+          padding: processedImages.masterPadding,
+          aspectRatio: processedImages.masterAspectRatio
+        }}
+        isPreCut={!wentThroughBackgroundRemoval}
         onComplete={(results) => {
           setProcessedImages(prev => ({
             ...prev,
@@ -175,7 +241,10 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
           }));
           setCurrentStep('complete');
         }}
-        onBack={() => setCurrentStep('positioning')}
+        onBack={() => {
+          const allPreCut = workflowFiles.every(file => file.isPreCut);
+          setCurrentStep(allPreCut ? 'precut-positioning' : 'positioning');
+        }}
       />
     );
   }

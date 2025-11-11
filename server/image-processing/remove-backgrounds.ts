@@ -8,10 +8,10 @@ interface RemoveBackgroundRequest {
 }
 
 export async function removeBackgrounds(req: RemoveBackgroundRequest) {
-  const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN;
+  const REPLICATE_API_KEY = process.env.REPLICATE_API_KEY;
   
-  if (!REPLICATE_API_TOKEN) {
-    throw new Error('REPLICATE_API_TOKEN is not configured');
+  if (!REPLICATE_API_KEY) {
+    throw new Error('REPLICATE_API_KEY is not configured');
   }
 
   const { images } = req;
@@ -26,7 +26,7 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
       const response = await fetch('https://api.replicate.com/v1/predictions', {
         method: 'POST',
         headers: {
-          'Authorization': `Token ${REPLICATE_API_TOKEN}`,
+          'Authorization': `Bearer ${REPLICATE_API_KEY}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -52,7 +52,7 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
         
         const statusResponse = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
           headers: {
-            'Authorization': `Token ${REPLICATE_API_TOKEN}`,
+            'Authorization': `Bearer ${REPLICATE_API_KEY}`,
           },
         });
         

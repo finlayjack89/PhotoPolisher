@@ -99,7 +99,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   // This effect fetches the preview cutout
   useEffect(() => {
     const getPreviewCutout = async () => {
-      if (!allSubjects || allSubjects.length === 0) {
+      if (!allSubjects || !Array.isArray(allSubjects) || allSubjects.length === 0) {
         setPreviewError("No subjects found to preview.");
         setIsPreviewLoading(false);
         return;
