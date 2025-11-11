@@ -32,6 +32,10 @@ export interface IStorage {
   // Batch Images
   getBatchImages(batchId: string): Promise<BatchImage[]>;
   createBatchImage(image: InsertBatchImage): Promise<BatchImage>;
+  
+  // File Storage
+  saveFileToMemStorage(storagePath: string, buffer: Buffer, mimeType: string): Promise<void>;
+  getFileFromMemStorage(storagePath: string): Promise<{ buffer: Buffer; mimeType: string } | null>;
 }
 
 export class MemStorage implements IStorage {
@@ -40,6 +44,7 @@ export class MemStorage implements IStorage {
   private systemHealth: SystemHealth[] = [];
   private backdropLibrary: Map<string, BackdropLibrary> = new Map();
   private batchImages: Map<string, BatchImage> = new Map();
+  private fileStorage: Map<string, { buffer: Buffer; mimeType: string }> = new Map();
 
   async getUserQuota(userId: string): Promise<UserQuota | null> {
     for (const [_, quota] of this.userQuotas) {
@@ -171,6 +176,14 @@ export class MemStorage implements IStorage {
     };
     this.batchImages.set(id, newImage);
     return newImage;
+  }
+
+  async saveFileToMemStorage(storagePath: string, buffer: Buffer, mimeType: string): Promise<void> {
+    this.fileStorage.set(storagePath, { buffer, mimeType });
+  }
+
+  async getFileFromMemStorage(storagePath: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
+    return this.fileStorage.get(storagePath) || null;
   }
 
   private generateCacheKey(originalUrl: string, operation: string, optionsHash: string): string {

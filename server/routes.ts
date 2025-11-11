@@ -74,13 +74,43 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
     }
   });
 
-  app.post("/api/backdrops", async (req: Request, res: Response) => {
+  app.post("/api/backdrops", upload.single('image'), async (req: Request, res: Response) => {
     try {
-      const validated = insertBackdropLibrarySchema.parse(req.body);
+      if (!req.file) {
+        return res.status(400).json({ error: "No image file provided" });
+      }
+
+      const validMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+      if (!validMimeTypes.includes(req.file.mimetype)) {
+        return res.status(400).json({ error: "Invalid image format. Please upload JPEG, PNG, or WebP" });
+      }
+
+      const { userId, name, width, height } = req.body;
+      
+      if (!userId || !name) {
+        return res.status(400).json({ error: "userId and name are required" });
+      }
+
+      // Generate unique storage path
+      const storagePath = `backdrops/${userId}/${Date.now()}-${req.file.originalname}`;
+      
+      // Save file to memory storage
+      await storage.saveFileToMemStorage(storagePath, req.file.buffer, req.file.mimetype);
+
+      const backdropData = {
+        userId,
+        name,
+        storagePath,
+        width: parseInt(width) || 1920,
+        height: parseInt(height) || 1080
+      };
+
+      const validated = insertBackdropLibrarySchema.parse(backdropData);
       const backdrop = await storage.createBackdrop(validated);
       res.json(backdrop);
     } catch (error) {
-      res.status(400).json({ error: "Invalid backdrop data" });
+      console.error("Error saving backdrop:", error);
+      res.status(400).json({ error: error instanceof Error ? error.message : "Invalid backdrop data" });
     }
   });
 
@@ -122,10 +152,25 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
 
   // Image Processing Routes
   
-  app.post("/api/remove-backgrounds", async (req: Request, res: Response) => {
+  app.post("/api/remove-backgrounds", upload.single('image'), async (req: Request, res: Response) => {
     try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No image file provided" });
+      }
+
+      const validMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+      if (!validMimeTypes.includes(req.file.mimetype)) {
+        return res.status(400).json({ error: "Invalid image format. Please upload JPEG, PNG, or WebP" });
+      }
+
       const { removeBackgrounds } = await import("./image-processing/remove-backgrounds");
-      const result = await removeBackgrounds(req.body);
+      
+      const image = {
+        data: `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`,
+        name: req.file.originalname || 'image',
+      };
+
+      const result = await removeBackgrounds({ images: [image] });
       res.json(result);
     } catch (error) {
       console.error("Error in remove-backgrounds:", error);
