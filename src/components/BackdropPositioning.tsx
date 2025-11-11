@@ -1,33 +1,30 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Upload, Move, RotateCw, RotateCcw, ArrowRight, AlertCircle, Zap, Library } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Upload, Move, ArrowRight, AlertCircle, Zap, Library, Loader2, Sparkles } from "lucide-react";
 import { SubjectPlacement } from "@/lib/canvas-utils";
 import { processAndCompressImage, getImageDimensions } from "@/lib/image-resize-utils";
 import { useToast } from "@/hooks/use-toast";
 import { BackdropLibrary } from "@/components/BackdropLibrary";
-import { rotateImageClockwise, rotateImageCounterClockwise } from "@/lib/image-rotation-utils";
 
 interface BackdropPositioningProps {
-  cutoutImages: string[]; // Data URLs of cut-out subjects (with shadows)
-  cleanSubjects?: string[]; // Data URLs of clean subjects (for CSS reflection preview)
+  originalImages: File[]; // Original uploaded files (before background removal)
   onPositioningComplete: (
     backdrop: string, 
     placement: SubjectPlacement, 
-    addBlur: boolean, 
-    rotatedSubjects?: string[]
+    masterPadding: number, 
+    masterAspectRatio: string
   ) => void;
   onBack: () => void;
 }
 
 export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
-  cutoutImages,
-  cleanSubjects = [],
+  originalImages,
   onPositioningComplete,
   onBack
 }) => {
@@ -41,26 +38,95 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   } | null>(null);
   const [showOptimization, setShowOptimization] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
-  const [addBlur, setAddBlur] = useState(false);
+  
+  // TASK 5: Preview cutout state
+  const [previewCutout, setPreviewCutout] = useState<string | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  
+  // TASK 6: AI floor detection state
+  const [floorY, setFloorY] = useState<number | null>(null);
+  
+  // TASK 7: Master setup state
+  const [masterPadding, setMasterPadding] = useState<number>(0.2); // 20%
+  const [masterAspectRatio, setMasterAspectRatio] = useState<string>('original');
+  
   const [placement, setPlacement] = useState<SubjectPlacement>({
     x: 0.5, // center
     y: 0.7, // slightly below center (typical product placement)
     scale: 0.8 // 80% of backdrop width
   });
-  const [rotatedSubjects, setRotatedSubjects] = useState<string[]>(cutoutImages);
-  const [rotatedCleanSubjects, setRotatedCleanSubjects] = useState<string[]>(cleanSubjects);
-  const [isRotating, setIsRotating] = useState(false);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const subjectRef = useRef<HTMLImageElement>(null);
-  const reflectionRef = useRef<HTMLImageElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const { toast } = useToast();
 
-  const firstSubject = rotatedSubjects[0]; // Use first rotated image for positioning
-  const firstCleanSubject = rotatedCleanSubjects.length > 0 ? rotatedCleanSubjects[0] : null;
+  // TASK 5: Generate preview cutout on mount
+  useEffect(() => {
+    const generatePreviewCutout = async () => {
+      if (originalImages.length === 0) return;
+      
+      setIsLoadingPreview(true);
+      try {
+        const firstImage = originalImages[0];
+        
+        // Convert File to base64
+        const reader = new FileReader();
+        const imageData = await new Promise<string>((resolve, reject) => {
+          reader.onload = (e) => {
+            if (e.target?.result) {
+              const base64 = (e.target.result as string).split(',')[1];
+              resolve(base64);
+            } else {
+              reject(new Error('Failed to read file'));
+            }
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(firstImage);
+        });
+        
+        // Call background removal API
+        const response = await fetch('/api/remove-backgrounds', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            images: [imageData]
+          })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Background removal failed');
+        }
+        
+        const result = await response.json();
+        
+        if (result.processedImages && result.processedImages.length > 0) {
+          setPreviewCutout(result.processedImages[0]);
+          toast({
+            title: "Preview Ready",
+            description: "Background removed from preview image",
+          });
+        } else {
+          throw new Error('No processed image returned');
+        }
+      } catch (error) {
+        console.error('Error generating preview cutout:', error);
+        toast({
+          title: "Preview Generation Failed",
+          description: "Could not generate preview cutout. Please try again.",
+          variant: "destructive"
+        });
+      } finally {
+        setIsLoadingPreview(false);
+      }
+    };
+    
+    generatePreviewCutout();
+  }, [originalImages, toast]);
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes';
@@ -136,10 +202,38 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     reader.readAsDataURL(backdropFile);
   };
 
-  useEffect(() => {
-    // Canvas is now only used for backward compatibility and final compositing
-    // Real-time preview is handled by CSS-based approach
-  }, [backdrop, firstSubject, placement]);
+  // TASK 6: AI backdrop analysis
+  const analyzeBackdrop = async (file: File) => {
+    try {
+      const formData = new FormData();
+      formData.append('backdrop', file);
+      
+      const response = await fetch('/api/analyze-backdrop', {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) {
+        throw new Error('Backdrop analysis failed');
+      }
+      
+      const result = await response.json();
+      
+      if (result.floorY !== undefined && result.floorY !== null) {
+        setFloorY(result.floorY);
+        // Auto-update placement.y to AI-detected floor position
+        setPlacement(prev => ({ ...prev, y: result.floorY }));
+        
+        toast({
+          title: "AI Floor Detected",
+          description: `Floor position: ${Math.round(result.floorY * 100)}%`,
+        });
+      }
+    } catch (error) {
+      console.error('Error analyzing backdrop:', error);
+      // Silent fail - floor detection is optional
+    }
+  };
 
   const handleBackdropUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -174,6 +268,9 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
           };
           reader.readAsDataURL(file);
         }
+        
+        // TASK 6: Analyze backdrop for AI floor detection
+        await analyzeBackdrop(file);
       } catch (error) {
         console.error('Error analyzing backdrop:', error);
         toast({
@@ -189,63 +286,22 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     setPlacement(prev => ({ ...prev, scale: value[0] }));
   };
 
-  const rotateSubject = async (direction: 'clockwise' | 'counterclockwise') => {
-    setIsRotating(true);
-    try {
-      // Rotate ALL subjects, not just the first one
-      const rotatedDataPromises = rotatedSubjects.map(async (subjectData) => {
-        return direction === 'clockwise' 
-          ? await rotateImageClockwise(subjectData)
-          : await rotateImageCounterClockwise(subjectData);
-      });
-
-      const allRotatedSubjects = await Promise.all(rotatedDataPromises);
-      setRotatedSubjects(allRotatedSubjects);
-      
-      // Also rotate ALL clean subjects for CSS reflection
-      if (rotatedCleanSubjects.length > 0) {
-        const rotatedCleanPromises = rotatedCleanSubjects.map(async (cleanData) => {
-          return direction === 'clockwise' 
-            ? await rotateImageClockwise(cleanData)
-            : await rotateImageCounterClockwise(cleanData);
-        });
-
-        const allRotatedClean = await Promise.all(rotatedCleanPromises);
-        setRotatedCleanSubjects(allRotatedClean);
-      }
-      
-      toast({
-        title: "All subjects rotated",
-        description: `Rotated ${rotatedSubjects.length} subjects ${direction}`,
-      });
-    } catch (error) {
-      console.error('Error rotating subjects:', error);
-      toast({
-        title: "Rotation failed",
-        description: "Failed to rotate the subjects. Please try again.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsRotating(false);
-    }
-  };
-
   const handleContinue = () => {
     if (backdrop) {
-      console.log('🎯 SECURE POSITIONING: Final placement values:', {
-        x: placement.x,
-        y: placement.y,
-        scale: placement.scale,
-        scalePercentage: Math.round(placement.scale * 100) + '%'
+      console.log('🎯 MASTER SETUP: Final configuration:', {
+        placement: {
+          x: placement.x,
+          y: placement.y,
+          scale: placement.scale
+        },
+        masterPadding,
+        masterAspectRatio,
+        totalImages: originalImages.length,
+        aiFloorDetected: floorY !== null
       });
-      console.log('🔍 PURE BACKDROP verification:', {
-        backdropLength: backdrop.length,
-        backdropFormat: backdrop.substring(0, 50),
-        isDataUrl: backdrop.startsWith('data:image/'),
-        backdropType: backdrop.split(';')[0]
-      });
-      console.log('✅ VERIFIED: Passing backdrop and subjects');
-      onPositioningComplete(backdrop, placement, addBlur, rotatedSubjects);
+      
+      // TASK 8: Updated callback signature
+      onPositioningComplete(backdrop, placement, masterPadding, masterAspectRatio);
     }
   };
 
@@ -344,11 +400,11 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
       <div className="max-w-6xl mx-auto space-y-6">
         <div className="text-center space-y-4">
           <div className="flex items-center justify-center gap-2 text-primary">
-            <Move className="h-8 w-8" />
-            <h1 className="text-3xl font-bold">Backdrop & Positioning</h1>
+            <Sparkles className="h-8 w-8" />
+            <h1 className="text-3xl font-bold">Master Setup</h1>
           </div>
           <p className="text-muted-foreground max-w-2xl mx-auto">
-            Upload a backdrop and position your product. This placement will be applied to all your images.
+            Configure your backdrop and positioning once. This setup will be applied to all {originalImages.length} images in batch processing.
           </p>
         </div>
 
@@ -356,9 +412,9 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
           {/* Left Panel - Controls */}
           <Card>
             <CardHeader>
-              <CardTitle>Step 5: Backdrop Setup</CardTitle>
+              <CardTitle>Master Configuration</CardTitle>
               <CardDescription>
-                Configure backdrop and position your first product
+                Set up backdrop, positioning, and output settings for batch processing
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -375,11 +431,18 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                     <div 
                       className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors"
                       onClick={() => fileInputRef.current?.click()}
+                      data-testid="upload-backdrop-zone"
                     >
                       <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
                       <p className="text-sm text-muted-foreground">
                         {backdrop ? "Backdrop uploaded" : "Click to upload backdrop"}
                       </p>
+                      {floorY !== null && (
+                        <Badge variant="secondary" className="mt-2">
+                          <Sparkles className="h-3 w-3 mr-1" />
+                          AI Floor: {Math.round(floorY * 100)}%
+                        </Badge>
+                      )}
                     </div>
                     <input
                       ref={fileInputRef}
@@ -387,6 +450,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                       accept="image/*"
                       onChange={handleBackdropUpload}
                       className="hidden"
+                      data-testid="input-backdrop-file"
                     />
                   </TabsContent>
                   
@@ -406,11 +470,13 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                               // Convert signed URL to data URL for proper processing
                               const response = await fetch(imageUrl);
                               const blob = await response.blob();
+                              const file = new File([blob], backdrop.name, { type: blob.type });
+                              
                               const reader = new FileReader();
                               reader.onload = (e) => {
                                 if (e.target?.result) {
                                   setBackdrop(e.target.result as string);
-                                  setBackdropFile(null); // Clear file reference for library images
+                                  setBackdropFile(file);
                                   toast({
                                     title: "Backdrop Selected",
                                     description: `Using "${backdrop.name}" from library`
@@ -418,6 +484,9 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                                 }
                               };
                               reader.readAsDataURL(blob);
+                              
+                              // Analyze the backdrop
+                              await analyzeBackdrop(file);
                             } catch (error) {
                               console.error('Error loading backdrop from library:', error);
                               toast({
@@ -434,53 +503,22 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                 </Tabs>
               </div>
 
-              {/* Background Blur Option */}
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="add-blur"
-                  checked={addBlur}
-                  onCheckedChange={(checked) => setAddBlur(checked === true)}
-                />
-                <Label htmlFor="add-blur">Add background blur (depth of field)</Label>
-              </div>
-
-              {/* Subject Rotation Controls */}
-              {firstSubject && (
-                <div className="space-y-3">
-                  <Label>Subject Orientation</Label>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => rotateSubject('counterclockwise')}
-                      disabled={isRotating}
-                      className="flex-1"
-                    >
-                      <RotateCcw className="h-4 w-4 mr-1" />
-                      90° CCW
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => rotateSubject('clockwise')}
-                      disabled={isRotating}
-                      className="flex-1"
-                    >
-                      <RotateCw className="h-4 w-4 mr-1" />
-                      90° CW
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Rotate all subjects before positioning on backdrop
-                  </p>
+              {/* TASK 6: AI Floor Detection Indicator */}
+              {floorY !== null && (
+                <div className="bg-primary/5 p-3 rounded-lg flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">AI Floor Detection Active</span>
+                  <Badge variant="secondary" className="ml-auto" data-testid="badge-ai-floor">
+                    {Math.round(floorY * 100)}%
+                  </Badge>
                 </div>
               )}
 
-              {/* Positioning Controls */}
-              {backdrop && firstSubject && (
+              {/* TASK 7: Positioning Controls with Master Settings */}
+              {backdrop && previewCutout && (
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label>Product Size</Label>
+                    <Label>Subject Scale</Label>
                     <Slider
                       value={[placement.scale]}
                       onValueChange={handleScaleChange}
@@ -488,16 +526,56 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                       min={0.1}
                       step={0.05}
                       className="w-full"
+                      data-testid="slider-subject-scale"
                     />
                     <div className="text-xs text-muted-foreground text-center">
                       {Math.round(placement.scale * 100)}% of backdrop width
                     </div>
                   </div>
 
+                  {/* TASK 7: Master Padding Slider */}
+                  <div className="space-y-2">
+                    <Label>Output Padding</Label>
+                    <Slider
+                      value={[masterPadding]}
+                      onValueChange={(value) => setMasterPadding(value[0])}
+                      max={0.5}
+                      min={0.05}
+                      step={0.05}
+                      className="w-full"
+                      data-testid="slider-master-padding"
+                    />
+                    <div className="text-xs text-muted-foreground text-center">
+                      {Math.round(masterPadding * 100)}% padding around subject
+                    </div>
+                  </div>
+
+                  {/* TASK 7: Aspect Ratio Select */}
+                  <div className="space-y-2">
+                    <Label>Output Aspect Ratio</Label>
+                    <Select 
+                      value={masterAspectRatio} 
+                      onValueChange={setMasterAspectRatio}
+                    >
+                      <SelectTrigger data-testid="select-aspect-ratio">
+                        <SelectValue placeholder="Select aspect ratio" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="original" data-testid="aspect-original">Original</SelectItem>
+                        <SelectItem value="1:1" data-testid="aspect-1-1">1:1 (Square)</SelectItem>
+                        <SelectItem value="4:3" data-testid="aspect-4-3">4:3 (Landscape)</SelectItem>
+                        <SelectItem value="3:4" data-testid="aspect-3-4">3:4 (Portrait)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <div className="text-xs text-muted-foreground">
+                      Applies to all output images in batch
+                    </div>
+                  </div>
+
                   <div className="bg-muted/50 p-3 rounded-lg">
                     <p className="text-sm font-medium mb-1">Positioning Instructions:</p>
                     <p className="text-xs text-muted-foreground">
-                      Click and drag on the preview to position your product. Use the size slider to adjust scale.
+                      Click and drag on the preview to position your product. Use the sliders to adjust scale and padding.
                     </p>
                   </div>
                 </div>
@@ -505,13 +583,15 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
 
               {/* Processing Info */}
               <div className="bg-primary/5 p-4 rounded-lg">
-                <h4 className="font-medium mb-2">Processing Info:</h4>
+                <h4 className="font-medium mb-2">Batch Processing Info:</h4>
                 <div className="text-sm text-muted-foreground space-y-1">
-                  <div>• Products to process: {cutoutImages.length}</div>
+                  <div>• Total images to process: {originalImages.length}</div>
                   <div>• Backdrop: {backdrop ? "✓ Ready" : "⚠ Required"}</div>
-                  <div>• Position: {backdrop ? "✓ Interactive" : "⚠ Upload backdrop first"}</div>
-                  {backdropAnalysis?.finalSize && (
-                    <div>• Final backdrop size: {formatFileSize(backdropAnalysis.finalSize)}</div>
+                  <div>• Preview: {previewCutout ? "✓ Generated" : isLoadingPreview ? "⏳ Generating..." : "⚠ Loading"}</div>
+                  <div>• Padding: {Math.round(masterPadding * 100)}%</div>
+                  <div>• Aspect Ratio: {masterAspectRatio}</div>
+                  {floorY !== null && (
+                    <div>• AI Floor Detection: ✓ Active ({Math.round(floorY * 100)}%)</div>
                   )}
                 </div>
               </div>
@@ -527,9 +607,18 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {backdrop && firstSubject ? (
+              {isLoadingPreview ? (
+                <div className="flex items-center justify-center h-[500px] bg-muted/20 rounded-lg border-2 border-dashed">
+                  <div className="text-center">
+                    <Loader2 className="h-12 w-12 mx-auto mb-2 text-primary animate-spin" />
+                    <p className="text-muted-foreground">
+                      Generating preview cutout...
+                    </p>
+                  </div>
+                </div>
+              ) : backdrop && previewCutout ? (
                 <div className="space-y-4">
-                  {/* CSS-based interactive preview with real-time reflection */}
+                  {/* Interactive preview */}
                   <div 
                     className="relative overflow-hidden rounded-lg border-2 border-primary/50"
                     style={{
@@ -560,8 +649,9 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                     }}
                     onMouseUp={() => setIsDragging(false)}
                     onMouseLeave={() => setIsDragging(false)}
+                    data-testid="preview-canvas"
                   >
-                    {/* Main Subject with Shadow (draggable) */}
+                    {/* Subject (draggable) */}
                     <div
                       className="absolute cursor-move select-none"
                       style={{
@@ -574,42 +664,14 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                         position: 'relative'
                       }}
                     >
-                      {/* Subject */}
                       <img
                         ref={subjectRef}
-                        src={firstSubject}
-                        alt="Product with shadow"
+                        src={previewCutout}
+                        alt="Product preview"
                         className="w-full h-auto select-none"
                         draggable={false}
                       />
-                      
-                      {/* CSS Reflection (positioned relative to subject) */}
-                      {firstCleanSubject && (
-                        <img
-                          ref={reflectionRef}
-                          src={firstCleanSubject}
-                          alt=""
-                          aria-hidden="true"
-                          className="css-reflection-base"
-                          draggable={false}
-                        />
-                      )}
                     </div>
-                    
-                    {/* Drag hint (for accessibility) */}
-                    <div
-                      className="absolute"
-                      style={{
-                        left: `${placement.x * 100}%`,
-                        top: `${placement.y * 100}%`,
-                        transform: 'translate(-50%, -50%)',
-                        width: `${placement.scale * 100}%`,
-                        maxWidth: '100%',
-                        height: 'auto',
-                        zIndex: 2
-                      }}
-                      draggable={false}
-                    />
                     
                     {/* Positioning guide */}
                     <div className="absolute bottom-2 right-2 bg-black/50 text-white px-2 py-1 rounded text-xs">
@@ -618,16 +680,16 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                   </div>
                   
                   <p className="text-sm text-muted-foreground text-center">
-                    Drag the product to position it. The reflection updates in real-time using CSS.
+                    Drag the product to position it. This setup will apply to all {originalImages.length} images.
                   </p>
                   
                   {/* Hidden canvas for backward compatibility */}
                   <canvas ref={canvasRef} className="hidden" />
                 </div>
               ) : (
-                <div className="flex items-center justify-center h-64 bg-muted/20 rounded-lg border-2 border-dashed">
+                <div className="flex items-center justify-center h-[500px] bg-muted/20 rounded-lg border-2 border-dashed">
                   <div className="text-center">
-                    <RotateCw className="h-12 w-12 mx-auto mb-2 text-muted-foreground" />
+                    <Move className="h-12 w-12 mx-auto mb-2 text-muted-foreground" />
                     <p className="text-muted-foreground">
                       Upload backdrop to see preview
                     </p>
@@ -639,15 +701,16 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         </div>
 
         <div className="flex justify-center gap-4">
-          <Button variant="outline" onClick={onBack}>
-            Back to Masks
+          <Button variant="outline" onClick={onBack} data-testid="button-back">
+            Back
           </Button>
           <Button 
             onClick={handleContinue} 
-            disabled={!backdrop}
+            disabled={!backdrop || !previewCutout || isLoadingPreview}
             className="min-w-[200px]"
+            data-testid="button-continue"
           >
-            Continue to Compositing
+            Continue to Batch Processing
             <ArrowRight className="ml-2 h-4 w-4" />
           </Button>
         </div>

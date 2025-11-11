@@ -177,12 +177,16 @@ export const fileToDataUrl = (file: File): Promise<string> => {
 /**
  * Composite backdrop, subject (with shadow), and generate reflection from clean subject
  * Layers: backdrop → reflection (generated from clean subject) → subject (with shadow)
+ * 
+ * @param outputCanvasSize - Optional canvas dimensions for subject-centric cropping
+ *   When provided, backdrop is scaled with "cover" semantics to fill the canvas
  */
 export const compositeLayers = async (
   backdropUrl: string,
   subjectWithShadowUrl: string,
   cleanSubjectUrl: string,
-  placement: SubjectPlacement
+  placement: SubjectPlacement,
+  outputCanvasSize?: { width: number; height: number }
 ): Promise<string> => {
   console.log('🎨 COMPOSITING: Starting layer composition with canvas-generated reflection');
   console.log('📊 Input validation:', {
@@ -244,21 +248,49 @@ export const compositeLayers = async (
 
     console.log('All images loaded successfully');
 
-    // Create canvas with backdrop dimensions
+    // Create canvas with specified or backdrop dimensions
     const canvas = document.createElement('canvas');
-    canvas.width = backdrop.width;
-    canvas.height = backdrop.height;
+    if (outputCanvasSize) {
+      canvas.width = outputCanvasSize.width;
+      canvas.height = outputCanvasSize.height;
+      console.log('Canvas created with subject-centric size:', `${canvas.width}x${canvas.height}`);
+    } else {
+      canvas.width = backdrop.width;
+      canvas.height = backdrop.height;
+      console.log('Canvas created with backdrop size:', `${canvas.width}x${canvas.height}`);
+    }
+    
     const ctx = canvas.getContext('2d');
 
     if (!ctx) {
       throw new Error('Failed to get canvas context');
     }
 
-    console.log('Canvas created:', `${canvas.width}x${canvas.height}`);
-
-    // Draw backdrop
+    // Draw backdrop with cover semantics when using custom canvas size
     console.log('Drawing backdrop...');
-    ctx.drawImage(backdrop, 0, 0);
+    if (outputCanvasSize) {
+      // Calculate scale to cover the canvas (like CSS background-size: cover)
+      const scaleX = canvas.width / backdrop.width;
+      const scaleY = canvas.height / backdrop.height;
+      const scale = Math.max(scaleX, scaleY);
+      
+      const scaledWidth = backdrop.width * scale;
+      const scaledHeight = backdrop.height * scale;
+      
+      // Center the backdrop
+      const offsetX = (canvas.width - scaledWidth) / 2;
+      const offsetY = (canvas.height - scaledHeight) / 2;
+      
+      ctx.drawImage(backdrop, offsetX, offsetY, scaledWidth, scaledHeight);
+      console.log('Backdrop drawn with cover semantics:', {
+        scale,
+        scaledSize: `${Math.round(scaledWidth)}x${Math.round(scaledHeight)}`,
+        offset: `${Math.round(offsetX)}, ${Math.round(offsetY)}`
+      });
+    } else {
+      // Draw backdrop at original size
+      ctx.drawImage(backdrop, 0, 0);
+    }
 
     // Calculate subject positioning based on placement settings
     const subjectAspectRatio = subjectWithShadow.naturalWidth / subjectWithShadow.naturalHeight;
