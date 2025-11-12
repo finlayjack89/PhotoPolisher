@@ -211,7 +211,7 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
     }
   });
 
-  app.post("/api/analyze-backdrop", upload.single('backdrop'), async (req: Request, res: Response) => {
+  app.post("/api/analyze-backdrop", upload.single('image'), async (req: Request, res: Response) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No backdrop image provided" });

@@ -309,8 +309,9 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
       },
       backdropStyles: {
         backgroundImage: `url(${backdrop})`,
-        backgroundSize: backdropSize,
-        backgroundPosition: `${backdropX} ${backdropY}`,
+        backgroundRepeat: 'no-repeat', // Fix tiling bug
+        backgroundSize: backdropSize, // Use dynamic calculated value
+        backgroundPosition: `${backdropX} ${backdropY}`, // Use dynamic calculated values
       },
       subjectStyles: {
         width: `${subjectPreviewW}px`,

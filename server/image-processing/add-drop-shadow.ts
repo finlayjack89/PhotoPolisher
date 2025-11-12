@@ -87,7 +87,9 @@ export async function addDropShadow(req: AddDropShadowRequest) {
       const uploadSignature = await generateSignature(signatureString, apiSecret);
 
       const uploadData = new FormData();
-      uploadData.append('file', img.data);
+      // Strip the data URL prefix to send only the base64 string
+      const base64Data = img.data.replace(/^data:image\/[a-z]+;base64,/, '');
+      uploadData.append('file', `data:image/png;base64,${base64Data}`);
       uploadData.append('api_key', apiKey);
       uploadData.append('timestamp', timestamp.toString());
       uploadData.append('signature', uploadSignature);
