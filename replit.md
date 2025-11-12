@@ -6,7 +6,36 @@ LuxSnap is a professional photo editing platform designed for e-commerce and pro
 
 ## Recent Changes
 
-### November 12, 2025 - Critical Bug Fixes
+### November 12, 2025 - AI & Quality Enhancements
+
+**Phase 1A: Chain-of-Thought AI Floor Detection** (analyze-images.ts)
+- Upgraded Gemini backdrop analysis prompt with explicit step-by-step reasoning
+- New structured JSON response includes:
+  - `wallDescription`: AI explanation of vertical surface identification
+  - `floorDescription`: AI explanation of horizontal surface identification  
+  - `intersectionReasoning`: Detailed logic for where surfaces meet
+  - `confidence`: High/medium/low assessment of floor line accuracy
+  - `floorY`: Numeric Y-coordinate (0.0-1.0) for product placement
+- Effect: More accurate floor detection with transparent reasoning chain for debugging/QA
+- Technical: Prompt guides Gemini through wall → floor → intersection → confidence assessment
+
+**Phase 1B: Professional Dual-Layer Shadows** (add-drop-shadow.ts)
+- Replaced single-layer Cloudinary shadows with dual-layer transformations
+- Layer 1: Soft diffuse shadow (50% opacity, gray #444444, offset x:5 y:10)
+- Layer 2: Sharp contact shadow (40% opacity, black #000000, offset x:5 y:10, radius:5)
+- Cloudinary URL: `e_shadow:50,x_5,y_10,co_rgb:444444/e_shadow:40,x_5,y_10,co_rgb:000000,r_5`
+- Effect: More realistic, professional-looking shadows with soft edges + sharp contact points
+- Performance: No additional API calls - both layers applied in single transformation
+
+**Phase 3: Dynamic Aspect Ratio Preview** (BackdropPositioning.tsx)
+- Fixed aspect ratio calculation in getPreviewStyles function
+- Now calculates dynamic aspect ratios from backdropDimensions (not subject dimensions)
+- Supports: 1:1 square, 3:4 portrait, 4:3 landscape, original (backdrop ratio)
+- Fallback chain: backdropDimensions → subjectDimensions → default '4/3'
+- Effect: Preview accurately reflects final output dimensions for all aspect ratio modes
+- Technical: Removed hardcoded `aspect-[4/3]` className, applied dynamic aspectRatio via backdropStyles
+
+**Previously Fixed - Critical Bug Fixes**
 
 **Fixed "Floating Preview" Bug in BackdropPositioning.tsx**
 - Changed CSS transform from `translate(-50%, -50%)` to `translate(-50%, -100%)` in getPreviewStyles function
