@@ -167,29 +167,38 @@ export async function analyzeBackdrop(req: AnalyzeBackdropRequest) {
   console.log('Analyzing backdrop image for floor surface detection');
 
   const prompt = `
-    Analyze this product backdrop image. Your goal is to find the exact "floor line" where products should be placed.
+    Analyze this product backdrop image to find the exact "floor line" where products should be placed.
     
-    Follow these steps in order:
-    1. Identify the primary vertical surface (the "wall" or background surface)
-    2. Identify the primary horizontal surface (the "floor" or table surface)
-    3. Find the line where these two surfaces intersect - this is the floor line
-    4. Return the Y-coordinate of this intersection line as a fraction from 0.0 (top) to 1.0 (bottom)
+    Think through this step-by-step using chain-of-thought reasoning:
     
-    Important guidelines:
-    - The floor line is where the horizontal and vertical planes meet
-    - This is typically a visible edge, crease, or transition between surfaces
-    - For studio backdrops with seamless backgrounds, look for the subtle curve where wall meets floor
-    - For product tables, find where the table surface meets the vertical backdrop
-    - If you cannot find a clear wall/floor intersection, find the bottom-most horizontal surface and return that Y-coordinate
-    - If completely uncertain, use 0.75 as the default
+    Step 1: Identify and describe the primary vertical surface (the "wall")
+    - What is the main vertical plane in the background?
+    - Describe its appearance, material, color, and characteristics
     
-    Example response for a typical studio shot:
-    { "floorY": 0.78 }
+    Step 2: Identify and describe the primary horizontal surface (the "floor")  
+    - What is the main horizontal plane where a product would rest?
+    - Describe its appearance, material, texture, and characteristics
     
-    Respond with ONLY a JSON object in this exact format:
+    Step 3: Analyze the intersection between wall and floor
+    - Where do these two surfaces meet?
+    - Is it a sharp edge, gentle curve, or subtle transition?
+    - Estimate the Y-coordinate as a fraction from 0.0 (top) to 1.0 (bottom)
+    - Explain your reasoning for this Y-coordinate
+    
+    Step 4: Assess your confidence
+    - How certain are you about the floor line position?
+    - What factors influenced your decision?
+    
+    Respond with a JSON object containing your complete reasoning chain:
     {
-      "floorY": 0.8
+      "wallDescription": "Describe the vertical surface you identified",
+      "floorDescription": "Describe the horizontal surface you identified",
+      "intersectionReasoning": "Explain where and how the surfaces meet",
+      "confidence": "high/medium/low",
+      "floorY": 0.78
     }
+    
+    The floorY value must be a number between 0.0 and 1.0. Use 0.75 as default if uncertain.
   `;
 
   try {
