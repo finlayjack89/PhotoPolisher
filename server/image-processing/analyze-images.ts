@@ -156,117 +156,166 @@ interface AnalyzeBackdropRequest {
   mimeType: string;
 }
 
-export async function analyzeBackdrop(req: AnalyzeBackdropRequest) {
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-  
-  if (!GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY is not configured');
+const FLOOR_Y_DEFAULT = 0.75;
+
+const floorPrompt = `Analyze this product backdrop image and return only JSON:
+{
+  "floorY": 0.85
+}
+Rules:
+- Locate the floor line where a product would rest (wall meets floor/table surface).
+- Use a value between 0.0 (top) and 1.0 (bottom).
+- If uncertain, use 0.75.
+Return strictly JSON with a single object.`;
+
+function stripCodeFences(text: string) {
+  return text.replace(/```(?:json)?\n?|```/gi, '').trim();
+}
+
+function extractFirstJsonObject(text: string): string | null {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let start = -1;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inString) {
+      if (!escaped && ch === '"') inString = false;
+      escaped = ch === '\\' && !escaped;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === '{') {
+      if (depth === 0) start = i;
+      depth++;
+      continue;
+    }
+
+    if (ch === '}') {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        return text.slice(start, i + 1);
+      }
+      continue;
+    }
   }
 
-  const { imageData, mimeType } = req;
-  console.log('Analyzing backdrop image for floor surface detection');
+  return null;
+}
 
-  const prompt = `
-    Analyze this product backdrop image to find the exact "floor line" where products should be placed.
-    
-    Think through this step-by-step using chain-of-thought reasoning:
-    
-    Step 1: Identify and describe the primary vertical surface (the "wall")
-    - What is the main vertical plane in the background?
-    - Describe its appearance, material, color, and characteristics
-    
-    Step 2: Identify and describe the primary horizontal surface (the "floor")  
-    - What is the main horizontal plane where a product would rest?
-    - Describe its appearance, material, texture, and characteristics
-    
-    Step 3: Analyze the intersection between wall and floor
-    - Where do these two surfaces meet?
-    - Is it a sharp edge, gentle curve, or subtle transition?
-    - Estimate the Y-coordinate as a fraction from 0.0 (top) to 1.0 (bottom)
-    - Explain your reasoning for this Y-coordinate
-    
-    Step 4: Assess your confidence
-    - How certain are you about the floor line position?
-    - What factors influenced your decision?
-    
-    Respond with a JSON object containing your complete reasoning chain:
-    {
-      "wallDescription": "Describe the vertical surface you identified",
-      "floorDescription": "Describe the horizontal surface you identified",
-      "intersectionReasoning": "Explain where and how the surfaces meet",
-      "confidence": "high/medium/low",
-      "floorY": 0.78
+function coerceToUnitFloat(value: unknown): number | null {
+  const num = typeof value === 'number' ? value : (typeof value === 'string' ? Number(value) : NaN);
+  return Number.isFinite(num) && num >= 0 && num <= 1 ? num : null;
+}
+
+function probeFloorY(obj: unknown): number | null {
+  if (!obj || typeof obj !== 'object') return null;
+
+  const directPaths: Array<(o: any) => unknown> = [
+    o => o.floorY,
+    o => o.result?.floorY,
+    o => o.data?.floorY,
+    o => o.floor?.y,
+    o => o.metrics?.floorY
+  ];
+
+  for (const getter of directPaths) {
+    const candidate = coerceToUnitFloat(getter(obj as any));
+    if (candidate !== null) return candidate;
+  }
+
+  for (const value of Object.values(obj)) {
+    const numeric = coerceToUnitFloat(value);
+    if (numeric !== null) return numeric;
+  }
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (coerceToUnitFloat(value) !== null && /floor.?y/i.test(key)) {
+      return coerceToUnitFloat(value);
     }
-    
-    The floorY value must be a number between 0.0 and 1.0. Use 0.75 as default if uncertain.
-  `;
+  }
+
+  for (const value of Object.values(obj)) {
+    const nested = probeFloorY(value);
+    if (nested !== null) return nested;
+  }
+
+  return null;
+}
+
+function parseFloorResponse(raw: string): number | null {
+  const cleaned = stripCodeFences(raw);
+  const candidates = [cleaned];
+  const extracted = extractFirstJsonObject(cleaned);
+  if (extracted && extracted !== cleaned) candidates.push(extracted);
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      const value = probeFloorY(parsed);
+      if (value !== null) return value;
+    } catch (err) {
+      console.warn('Gemini JSON parse attempt failed', err);
+    }
+  }
+
+  return null;
+}
+
+export async function analyzeBackdrop(req: AnalyzeBackdropRequest) {
+  const { imageData, mimeType } = req;
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+  if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY is not configured');
+
+  console.log('Analyzing backdrop image for floor surface detection');
 
   try {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{
           parts: [
-            { text: prompt },
-            {
-              inline_data: {
-                mime_type: mimeType,
-                data: imageData
-              }
-            }
+            { text: floorPrompt },
+            { inline_data: { mime_type: mimeType, data: imageData } }
           ]
         }],
         generationConfig: {
           temperature: 0.1,
           maxOutputTokens: 200,
+          responseMimeType: 'application/json'
         }
       })
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Gemini API error for backdrop analysis:', errorText);
+      const body = await response.text();
+      console.error('Gemini API error for backdrop analysis:', body);
       throw new Error(`Gemini API error: ${response.status}`);
     }
 
-    const data = await response.json() as any;
-    
-    if (!data.candidates || data.candidates.length === 0) {
-      throw new Error('No analysis generated by Gemini');
+    const payload = await response.json() as any;
+    const rawText = payload?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    const parsed = parseFloorResponse(rawText);
+    const floorY = parsed ?? FLOOR_Y_DEFAULT;
+    const clamped = Math.max(0, Math.min(1, floorY));
+
+    if (parsed === null) {
+      console.warn('Falling back to default floorY; Gemini response unparseable.', { rawText });
     }
 
-    const analysisText = data.candidates[0].content.parts[0].text;
-    
-    let floorData;
-    try {
-      const cleanText = analysisText.replace(/```json\n?|\n?```/g, '').trim();
-      floorData = JSON.parse(cleanText);
-    } catch (parseError) {
-      console.log('JSON parse failed, using default floor position');
-      floorData = { floorY: 0.75 };
-    }
-
-    const floorY = typeof floorData.floorY === 'number' ? floorData.floorY : 0.75;
-    
-    // Clamp value between 0.0 and 1.0
-    const clampedFloorY = Math.max(0.0, Math.min(1.0, floorY));
-
-    console.log(`✅ Backdrop analysis complete. Floor Y: ${clampedFloorY}`);
-
-    return {
-      success: true,
-      floorY: clampedFloorY
-    };
-
+    console.log('Backdrop analysis complete', { floorY: clamped });
+    return { success: true, floorY: clamped };
   } catch (error) {
     console.error('Error analyzing backdrop:', error);
-    
-    return {
-      success: true,
-      floorY: 0.75
-    };
+    return { success: true, floorY: FLOOR_Y_DEFAULT };
   }
 }
