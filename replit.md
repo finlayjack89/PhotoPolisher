@@ -4,6 +4,21 @@
 
 LuxSnap is a professional photo editing platform designed for e-commerce and product photography. The application provides AI-powered background removal, shadow generation, backdrop positioning, and batch processing capabilities to transform product photos into studio-quality images. Built with React, TypeScript, and Express, it leverages third-party AI services for image processing while maintaining a clean, modern user interface.
 
+## Recent Changes
+
+### November 12, 2025 - Critical Bug Fixes
+
+**Fixed "Floating Preview" Bug in BackdropPositioning.tsx**
+- Changed CSS transform from `translate(-50%, -50%)` to `translate(-50%, -100%)` in getPreviewStyles function
+- Effect: Product preview now aligns its bottom edge to the floor line instead of centering on it
+- This ensures accurate visualization of final product placement during backdrop positioning step
+
+**Fixed "Warped Image" Compositing Bug in canvas-utils.ts**
+- Refactored compositeLayers function to use separate temporary canvas for reflection generation
+- Before: Drew main canvas onto itself to apply blur, causing image corruption and warping
+- After: Creates dedicated reflection canvas, applies transformations there, then blits to main canvas
+- Effect: Eliminates warped/corrupt final images, produces clean composites with proper reflections
+
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.
