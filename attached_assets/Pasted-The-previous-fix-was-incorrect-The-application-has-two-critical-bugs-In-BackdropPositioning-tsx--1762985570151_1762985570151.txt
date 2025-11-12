@@ -1,3 +1,18 @@
+The previous fix was incorrect. The application has two critical bugs:
+
+In BackdropPositioning.tsx, the preview item is "floating" because its CSS transform is set to translate(-50%, -50%), centering it on the floor line instead of placing its bottom on it.
+
+In lib/canvas-utils.ts, the compositeLayers function is drawing the canvas onto itself to apply a blur, creating a corrupt, warped final image.
+
+We will fix both.
+
+Phase 1: Fix the "Floating Item" Preview
+Action: Replace the entire contents of src/components/BackdropPositioning.tsx with this corrected code. The only significant change is on line 230.
+
+File: src/components/BackdropPositioning.tsx
+
+TypeScript
+
 import React, { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -474,4 +489,212 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
       </div>
     </div>
   );
+};
+Phase 2: Fix the "Warped Image" Compositing Bug
+Action: Replace the entire contents of src/lib/canvas-utils.ts with this. This is the definitive fix for the black/warped image.
+
+File: src/lib/canvas-utils.ts
+
+TypeScript
+
+/**
+ * Canvas utilities for AI commercial photo editing workflow
+ */
+
+export interface SubjectPlacement {
+  x: number; // fraction of canvas width (0-1) - typically 0.5
+  y: number; // fraction of canvas height (0-1) - the "floor"
+  scale: number; // Legacy, no longer used
+}
+
+/**
+ * Utility to get image dimensions from data URL or blob URL
+ */
+export const getImageDimensions = (dataUrl: string): Promise<{ width: number; height: number }> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    };
+    img.onerror = (err) => reject(new Error(`Failed to load image for dimensions: ${err}`));
+    img.src = dataUrl;
+  });
+};
+
+/**
+ * Convert File to data URL
+ */
+export const fileToDataUrl = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      if (e.target?.result) {
+        resolve(e.target.result as string);
+      } else {
+        reject('Failed to read file');
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
+/**
+ * Helper function to load an image
+ */
+const loadImage = (src: string, name: string): Promise<HTMLImageElement> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = (err) => reject(new Error(`Failed to load ${name} image: ${err}`));
+    img.src = src;
+  });
+};
+
+/**
+ * [REFACTORED] Composite backdrop, subject, and reflection
+ * This function now implements Subject-Centric Cropping.
+ * It creates a canvas of a specific size, then "zooms" the backdrop to fit.
+ */
+export const compositeLayers = async (
+  backdropUrl: string,
+  subjectWithShadowUrl: string,
+  cleanSubjectUrl: string,
+  placement: SubjectPlacement, // Contains the X/Y *floor* placement
+  outputCanvasSize: { width: number; height: number },
+  padding: number // Master padding (e.g., 20)
+): Promise<string> => {
+  
+  console.log('🎨 COMPOSITING: Starting Subject-Centric composite');
+  
+  try {
+    const [backdrop, subjectWithShadow, cleanSubject] = await Promise.all([
+      loadImage(backdropUrl, 'backdrop'),
+      loadImage(subjectWithShadowUrl, 'subject with shadow'),
+      loadImage(cleanSubjectUrl, 'clean subject')
+    ]);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = outputCanvasSize.width;
+    canvas.height = outputCanvasSize.height;
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) {
+      throw new Error('Failed to get canvas context');
+    }
+
+    // --- 1. Draw Backdrop (Cropped/Zoomed) ---
+    const canvasAspect = canvas.width / canvas.height;
+    const backdropAspect = backdrop.width / backdrop.height;
+    
+    let scale = 1;
+    let drawX = 0;
+    let drawY = 0;
+    
+    // This logic mimics CSS "background-size: cover"
+    if (backdropAspect > canvasAspect) { // Backdrop is wider than canvas
+      scale = canvas.height / backdrop.height;
+      drawX = -(backdrop.width * scale - canvas.width) / 2; // Center X
+    } else { // Backdrop is taller than canvas
+      scale = canvas.width / backdrop.width;
+      drawY = -(backdrop.height * scale - canvas.height) / 2; // Center Y
+    }
+
+    let finalDrawX = drawX;
+    let finalDrawY = drawY;
+
+    // Adjust Y based on the floor snap
+    const scaledBackdropHeight = backdrop.height * scale;
+    const backdropFloorPx = (backdrop.height * placement.y) * scale;
+    const canvasFloorPx = canvas.height * placement.y;
+    
+    const yOffset = canvasFloorPx - (backdropFloorPx + finalDrawY);
+    
+    finalDrawY = Math.min(0, Math.max(canvas.height - scaledBackdropHeight, finalDrawY + yOffset));
+    
+    ctx.drawImage(backdrop, finalDrawX, finalDrawY, backdrop.width * scale, backdrop.height * scale);
+
+    // --- 2. Calculate Subject Position (based on padding) ---
+    const paddingPercent = padding / 100;
+    const subjectAspectRatio = subjectWithShadow.naturalWidth / subjectWithShadow.naturalHeight;
+
+    const innerBoxW = canvas.width * (1 - paddingPercent * 2);
+    const innerBoxH = canvas.height * (1 - paddingPercent * 2);
+    
+    let scaledWidth = innerBoxW;
+    let scaledHeight = scaledWidth / subjectAspectRatio;
+    
+    if (scaledHeight > innerBoxH) {
+      scaledHeight = innerBoxH;
+      scaledWidth = scaledHeight * subjectAspectRatio;
+    }
+    
+    const dx = (canvas.width - scaledWidth) / 2; // Center horizontally
+    const canvasFloorY = canvas.height * placement.y; // The "floor" line
+    const dy = canvasFloorY - scaledHeight; // Position subject's bottom on the floor
+    
+    // --- 3. Generate and Draw Reflection (THE FIX) ---
+    const reflectionHeight = scaledHeight * 0.6; // 60% height
+    
+    // Create a temporary canvas for the reflection *only*
+    const reflectCanvas = document.createElement('canvas');
+    reflectCanvas.width = scaledWidth;
+    reflectCanvas.height = reflectionHeight;
+    const reflectCtx = reflectCanvas.getContext('2d');
+    
+    if (reflectCtx) {
+      reflectCtx.save();
+      reflectCtx.scale(1, -1); // Flip vertically
+      // Draw the *clean* subject (flipped)
+      reflectCtx.drawImage(cleanSubject, 0, -reflectionHeight, scaledWidth, reflectionHeight);
+      reflectCtx.restore();
+      
+      // Apply fade gradient
+      const gradient = reflectCtx.createLinearGradient(0, 0, 0, reflectionHeight);
+      gradient.addColorStop(0, 'rgba(0, 0, 0, 0.4)'); // Start at 40% opacity
+      gradient.addColorStop(0.6, 'rgba(0, 0, 0, 0.1)');
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      
+      reflectCtx.globalCompositeOperation = 'destination-in';
+      reflectCtx.fillStyle = gradient;
+      reflectCtx.fillRect(0, 0, scaledWidth, reflectionHeight);
+      
+      // Draw the reflection from the temp canvas to the main canvas
+      ctx.save();
+      ctx.filter = 'blur(2px)';
+      ctx.drawImage(reflectCanvas, dx, canvasFloorY); // Position reflection *at* the floor line
+      ctx.restore();
+    }
+    
+    // --- 4. Draw Subject (with shadow) ---
+    ctx.drawImage(subjectWithShadow, dx, dy, scaledWidth, scaledHeight);
+
+    const finalDataUrl = canvas.toDataURL('image/png');
+    console.log('Compositing complete.');
+    
+    return finalDataUrl;
+
+  } catch (error) {
+    console.error('Error during compositing:', error);
+    throw error;
+  }
+};
+
+
+// Other functions (no longer used by main flow, but harmless)
+export const convertBlackToTransparent = async (imageDataUrl: string): Promise<string> => {
+  return imageDataUrl; 
+};
+export const applyMaskToImage = async (originalImageDataUrl: string, maskImageDataUrl: string): Promise<string> => {
+  return originalImageDataUrl;
+};
+export const positionSubjectOnCanvas = async (
+  subjectDataUrl: string, 
+  targetWidth: number, 
+  targetHeight: number, 
+  placement: SubjectPlacement
+): Promise<string> => {
+  return subjectDataUrl;
 };

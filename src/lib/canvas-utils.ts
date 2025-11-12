@@ -3,8 +3,8 @@
  */
 
 export interface SubjectPlacement {
-  x: number; // fraction of canvas width (0-1)
-  y: number; // fraction of canvas height (0-1)
+  x: number; // fraction of canvas width (0-1) - typically 0.5
+  y: number; // fraction of canvas height (0-1) - the "floor"
   scale: number; // Legacy, no longer used
 }
 
@@ -86,39 +86,41 @@ export const compositeLayers = async (
       throw new Error('Failed to get canvas context');
     }
 
-    console.log('Canvas created:', `${canvas.width}x${canvas.height}`);
-
     // --- 1. Draw Backdrop (Cropped/Zoomed) ---
-    console.log('Drawing backdrop with "zoom" effect...');
     const canvasAspect = canvas.width / canvas.height;
     const backdropAspect = backdrop.width / backdrop.height;
     
-    let drawW, drawH, drawX, drawY;
-
+    let scale = 1;
+    let drawX = 0;
+    let drawY = 0;
+    
     // This logic mimics CSS "background-size: cover"
     if (backdropAspect > canvasAspect) { // Backdrop is wider than canvas
-      drawH = canvas.height;
-      drawW = backdrop.width * (canvas.height / backdrop.height);
-      // Center horizontally on the user's X placement
-      drawX = -(drawW - canvas.width) * placement.x; 
-      drawY = 0;
+      scale = canvas.height / backdrop.height;
+      drawX = -(backdrop.width * scale - canvas.width) / 2; // Center X
     } else { // Backdrop is taller than canvas
-      drawW = canvas.width;
-      drawH = backdrop.height * (canvas.width / backdrop.width);
-      drawX = 0;
-      // Align the backdrop's "floor" (placement.y) with the canvas's "floor"
-      const backdropFloorPx = backdrop.height * placement.y;
-      const canvasFloorPx = canvas.height * placement.y;
-      drawY = canvasFloorPx - (backdropFloorPx * (drawW / backdrop.width));
+      scale = canvas.width / backdrop.width;
+      drawY = -(backdrop.height * scale - canvas.height) / 2; // Center Y
     }
+
+    let finalDrawX = drawX;
+    let finalDrawY = drawY;
+
+    // Adjust Y based on the floor snap
+    const scaledBackdropHeight = backdrop.height * scale;
+    const backdropFloorPx = (backdrop.height * placement.y) * scale;
+    const canvasFloorPx = canvas.height * placement.y;
     
-    ctx.drawImage(backdrop, drawX, drawY, drawW, drawH);
+    const yOffset = canvasFloorPx - (backdropFloorPx + finalDrawY);
+    
+    finalDrawY = Math.min(0, Math.max(canvas.height - scaledBackdropHeight, finalDrawY + yOffset));
+    
+    ctx.drawImage(backdrop, finalDrawX, finalDrawY, backdrop.width * scale, backdrop.height * scale);
 
     // --- 2. Calculate Subject Position (based on padding) ---
     const paddingPercent = padding / 100;
     const subjectAspectRatio = subjectWithShadow.naturalWidth / subjectWithShadow.naturalHeight;
 
-    // Calculate the "box" the subject must fit in, based on padding
     const innerBoxW = canvas.width * (1 - paddingPercent * 2);
     const innerBoxH = canvas.height * (1 - paddingPercent * 2);
     
@@ -130,58 +132,44 @@ export const compositeLayers = async (
       scaledWidth = scaledHeight * subjectAspectRatio;
     }
     
-    // Position subject based on placement.x and placement.y
-    // Clamp to keep subject within padded inner box
-    const minX = canvas.width * paddingPercent;
-    const maxX = canvas.width * (1 - paddingPercent) - scaledWidth;
-    const minY = canvas.height * paddingPercent;
-    const maxY = canvas.height * (1 - paddingPercent);
+    const dx = (canvas.width - scaledWidth) / 2; // Center horizontally
+    const canvasFloorY = canvas.height * placement.y; // The "floor" line
+    const dy = canvasFloorY - scaledHeight; // Position subject's bottom on the floor
     
-    const desiredX = (canvas.width * placement.x) - (scaledWidth / 2);
-    const desiredY = (canvas.height * placement.y) - scaledHeight;
-    
-    const dx = Math.max(minX, Math.min(maxX, desiredX)); // Horizontal positioning clamped
-    const dy = Math.max(minY, Math.min(maxY - scaledHeight, desiredY)); // Vertical positioning clamped - keeps entire subject inside box
-    
-    console.log('Subject positioning:', {
-      size: `${scaledWidth}x${scaledHeight}`,
-      position: `${Math.round(dx)}, ${Math.round(dy)}`
-    });
-
     // --- 3. Generate and Draw Reflection (THE FIX) ---
-    console.log('🪞 Generating canvas-based reflection...');
-    
     const reflectionHeight = scaledHeight * 0.6; // 60% height
-    ctx.save();
-    ctx.translate(dx, dy + scaledHeight); // Position *exactly* below subject
-    ctx.scale(1, -1); // Flip vertically
     
-    // Draw the *clean* subject (flipped)
-    ctx.drawImage(cleanSubject, 0, 0, scaledWidth, reflectionHeight);
+    // Create a temporary canvas for the reflection *only*
+    const reflectCanvas = document.createElement('canvas');
+    reflectCanvas.width = scaledWidth;
+    reflectCanvas.height = reflectionHeight;
+    const reflectCtx = reflectCanvas.getContext('2d');
     
-    // Apply fade gradient
-    const gradient = ctx.createLinearGradient(0, 0, 0, reflectionHeight);
-    gradient.addColorStop(0, 'rgba(0, 0, 0, 0.4)'); // Start at 40% opacity
-    gradient.addColorStop(0.6, 'rgba(0, 0, 0, 0.1)');
-    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    
-    ctx.globalCompositeOperation = 'destination-in';
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, scaledWidth, reflectionHeight);
-    
-    // Apply blur
-    ctx.filter = 'blur(2px)';
-    // We must draw onto itself to apply the filter
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.drawImage(canvas, 
-      dx, canvas.height - (dy + scaledHeight), scaledWidth, reflectionHeight, // Source (flipped area)
-      0, 0, scaledWidth, reflectionHeight // Destination (in the save/restored context)
-    );
-
-    ctx.restore(); // Restore context (removes flip, blur, etc.)
+    if (reflectCtx) {
+      reflectCtx.save();
+      reflectCtx.scale(1, -1); // Flip vertically
+      // Draw the *clean* subject (flipped)
+      reflectCtx.drawImage(cleanSubject, 0, -reflectionHeight, scaledWidth, reflectionHeight);
+      reflectCtx.restore();
+      
+      // Apply fade gradient
+      const gradient = reflectCtx.createLinearGradient(0, 0, 0, reflectionHeight);
+      gradient.addColorStop(0, 'rgba(0, 0, 0, 0.4)'); // Start at 40% opacity
+      gradient.addColorStop(0.6, 'rgba(0, 0, 0, 0.1)');
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      
+      reflectCtx.globalCompositeOperation = 'destination-in';
+      reflectCtx.fillStyle = gradient;
+      reflectCtx.fillRect(0, 0, scaledWidth, reflectionHeight);
+      
+      // Draw the reflection from the temp canvas to the main canvas
+      ctx.save();
+      ctx.filter = 'blur(2px)';
+      ctx.drawImage(reflectCanvas, dx, canvasFloorY); // Position reflection *at* the floor line
+      ctx.restore();
+    }
     
     // --- 4. Draw Subject (with shadow) ---
-    console.log('Drawing subject with shadow on top...');
     ctx.drawImage(subjectWithShadow, dx, dy, scaledWidth, scaledHeight);
 
     const finalDataUrl = canvas.toDataURL('image/png');
