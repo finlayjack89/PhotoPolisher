@@ -6,18 +6,25 @@ LuxSnap is a professional photo editing platform designed for e-commerce and pro
 
 ## Recent Changes
 
-### November 12, 2025 - AI & Quality Enhancements
+### November 12, 2025 - Production-Ready AI Floor Detection Fix
 
-**Phase 1A: Chain-of-Thought AI Floor Detection** (analyze-images.ts)
-- Upgraded Gemini backdrop analysis prompt with explicit step-by-step reasoning
-- New structured JSON response includes:
-  - `wallDescription`: AI explanation of vertical surface identification
-  - `floorDescription`: AI explanation of horizontal surface identification  
-  - `intersectionReasoning`: Detailed logic for where surfaces meet
-  - `confidence`: High/medium/low assessment of floor line accuracy
-  - `floorY`: Numeric Y-coordinate (0.0-1.0) for product placement
-- Effect: More accurate floor detection with transparent reasoning chain for debugging/QA
-- Technical: Prompt guides Gemini through wall → floor → intersection → confidence assessment
+**Phase 1A: Robust JSON Parsing for AI Floor Detection** (analyze-images.ts)
+- Implemented production-ready `analyzeBackdrop` function with comprehensive JSON parsing
+- New helper functions for robust parsing:
+  - `stripCodeFences`: Removes markdown code fences from Gemini responses
+  - `extractFirstJsonObject`: Balanced-brace extractor handles nested objects, strings, escapes
+  - `coerceToUnitFloat`: Converts numbers or numeric strings to valid 0-1 float values
+  - `probeFloorY`: Multi-tier value extraction with defensive key probing
+  - `parseFloorResponse`: Orchestrates multiple parsing strategies
+- Simplified Gemini prompt demanding strict JSON output: `{"floorY": 0.85}`
+- Added `responseMimeType: 'application/json'` to enforce JSON-only responses
+- Multi-tier value extraction handles:
+  - Top-level: `{"floorY": 0.85}`
+  - Nested: `{"result": {"floorY": 0.82}}`
+  - String values: `{"floorY": "0.85"}`
+  - Multiple objects or trailing text
+- Effect: Eliminates "JSON parse failed" errors, provides accurate floor detection (not defaulting to 0.75)
+- Fallback: Gracefully defaults to 0.75 with clear logging when Gemini response is unparseable
 
 **Phase 1B: Professional Dual-Layer Shadows** (add-drop-shadow.ts)
 - Replaced single-layer Cloudinary shadows with dual-layer transformations
