@@ -167,22 +167,29 @@ export async function analyzeBackdrop(req: AnalyzeBackdropRequest) {
   console.log('Analyzing backdrop image for floor surface detection');
 
   const prompt = `
-    Analyze this backdrop image and identify the "floor" or primary horizontal surface where a product would naturally rest.
+    Analyze this product backdrop image. Your goal is to find the exact "floor line" where products should be placed.
     
-    I need you to find the vertical center (Y coordinate) of this floor/surface area as a fraction from 0.0 (top of image) to 1.0 (bottom of image).
+    Follow these steps in order:
+    1. Identify the primary vertical surface (the "wall" or background surface)
+    2. Identify the primary horizontal surface (the "floor" or table surface)
+    3. Find the line where these two surfaces intersect - this is the floor line
+    4. Return the Y-coordinate of this intersection line as a fraction from 0.0 (top) to 1.0 (bottom)
     
-    Guidelines:
-    - Look for the main horizontal surface, table, floor, or platform
-    - The floor is typically in the lower portion of the image
-    - For marble, wood, or tile surfaces, identify the main flat plane
-    - If no clear floor is visible, use 0.75 as a default
+    Important guidelines:
+    - The floor line is where the horizontal and vertical planes meet
+    - This is typically a visible edge, crease, or transition between surfaces
+    - For studio backdrops with seamless backgrounds, look for the subtle curve where wall meets floor
+    - For product tables, find where the table surface meets the vertical backdrop
+    - If you cannot find a clear wall/floor intersection, find the bottom-most horizontal surface and return that Y-coordinate
+    - If completely uncertain, use 0.75 as the default
+    
+    Example response for a typical studio shot:
+    { "floorY": 0.78 }
     
     Respond with ONLY a JSON object in this exact format:
     {
       "floorY": 0.8
     }
-    
-    The floorY value should be a number between 0.0 and 1.0 representing where products should be placed on this backdrop.
   `;
 
   try {

@@ -117,9 +117,12 @@ export async function addDropShadow(req: AddDropShadowRequest) {
       const paddingMultiplier = Math.max(1.5, 1 + (spread / 100));
       console.log(`Using padding multiplier: ${paddingMultiplier}x for spread: ${spread}`);
       
-      const transformedUrl = `https://res.cloudinary.com/${cloudName}/image/upload/c_lpad,w_iw_mul_${paddingMultiplier},h_ih_mul_${paddingMultiplier},b_transparent/e_dropshadow:azimuth_${azimuth};elevation_${elevation};spread_${spread}/${uploadResult.public_id}.png`;
+      // Dual-layer shadow for more realistic, professional results
+      // Layer 1: Soft, diffuse shadow (gray)
+      // Layer 2: Sharp contact shadow (black)
+      const transformedUrl = `https://res.cloudinary.com/${cloudName}/image/upload/c_lpad,w_iw_mul_${paddingMultiplier},h_ih_mul_${paddingMultiplier},b_transparent/e_shadow:50,x_5,y_10,co_rgb:444444/e_shadow:40,x_5,y_10,co_rgb:000000,r_5/${uploadResult.public_id}.png`;
       
-      console.log(`Transformation URL: ${transformedUrl}`);
+      console.log(`Transformation URL (dual-layer shadow): ${transformedUrl}`);
 
       const transformedResponse = await fetch(transformedUrl);
       
