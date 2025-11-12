@@ -208,12 +208,31 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     const padding = masterPadding / 100;
     const subjectWidthPercent = 100 * (1 - padding * 2);
     
+    // --- Calculate Dynamic Aspect Ratio ---
+    let aspectRatio = '4 / 3'; // Default
+    if (masterAspectRatio === '1:1') {
+      aspectRatio = '1 / 1';
+    } else if (masterAspectRatio === '3:4') {
+      aspectRatio = '3 / 4';
+    } else if (masterAspectRatio === '4:3') {
+      aspectRatio = '4 / 3';
+    } else if (masterAspectRatio === 'original') {
+      // Use backdrop's original dimensions for 'original' mode
+      if (backdropDimensions.w > 1 && backdropDimensions.h > 1) {
+        aspectRatio = `${backdropDimensions.w} / ${backdropDimensions.h}`;
+      } else if (subjectDimensions.w > 1 && subjectDimensions.h > 1) {
+        // Fallback to subject dimensions if backdrop dimensions unavailable
+        aspectRatio = `${subjectDimensions.w} / ${subjectDimensions.h}`;
+      }
+    }
+    
     return {
       backdropStyles: {
         backgroundImage: `url(${backdrop})`,
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
+        aspectRatio: aspectRatio, // Apply dynamic aspect ratio
       },
       subjectStyles: {
         width: `${subjectWidthPercent}%`,
@@ -417,7 +436,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                   </div>
                 ) : (
                   <div
-                    className="relative w-full max-w-full aspect-[4/3] overflow-hidden rounded-lg border-2 border-primary/50"
+                    className="relative w-full max-w-full overflow-hidden rounded-lg border-2 border-primary/50"
                     style={backdropStyles}
                     onMouseDown={(e) => {
                       setIsDragging(true);
