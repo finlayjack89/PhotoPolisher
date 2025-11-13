@@ -101,3 +101,98 @@ export const api = {
     body: JSON.stringify(data),
   }),
 };
+
+/**
+ * Upload a backdrop file (two-step process)
+ * Step 1: Upload file to /api/upload to get storage URL
+ * Step 2: Create backdrop entry in database with metadata
+ * @returns The created backdrop object from the server
+ */
+export async function uploadBackdrop(formData: FormData): Promise<any> {
+  // Step 1: Upload the file itself
+  const fileFormData = new FormData();
+  const imageFile = formData.get('image');
+  
+  if (!imageFile) {
+    throw new Error('No image file provided');
+  }
+  
+  // Ensure we have a File or Blob object
+  let fileToUpload: File;
+  if (imageFile as any instanceof File) {
+    fileToUpload = imageFile as File;
+  } else if (imageFile as any instanceof Blob) {
+    // Wrap Blob in File with a default name
+    const blob = imageFile as Blob;
+    fileToUpload = new File([blob], 'backdrop.png', { type: blob.type || 'image/png' });
+  } else {
+    throw new Error('Image must be a File or Blob object');
+  }
+  
+  fileFormData.append('file', fileToUpload);
+  
+  const uploadResponse = await fetch('/api/upload', {
+    method: 'POST',
+    body: fileFormData,
+  });
+  
+  // Read response body once
+  const responseText = await uploadResponse.text();
+  
+  if (!uploadResponse.ok) {
+    let error;
+    try {
+      error = responseText ? JSON.parse(responseText) : { error: 'Upload failed' };
+    } catch {
+      error = { error: 'Upload failed' };
+    }
+    throw new Error(error.error || `File upload failed: ${uploadResponse.status}`);
+  }
+  
+  // Parse success response
+  let uploadResult;
+  try {
+    uploadResult = JSON.parse(responseText);
+  } catch {
+    throw new Error('Invalid response from upload endpoint');
+  }
+  
+  const storagePath = uploadResult.url;
+  
+  if (!storagePath) {
+    throw new Error('Upload response missing URL');
+  }
+  
+  // Step 2: Create backdrop entry in database with validation
+  const name = formData.get('name');
+  const userId = formData.get('userId');
+  const widthStr = formData.get('width');
+  const heightStr = formData.get('height');
+  
+  if (!name || !userId) {
+    throw new Error('Missing required fields: name or userId');
+  }
+  
+  const width = widthStr ? parseInt(widthStr as string) : undefined;
+  const height = heightStr ? parseInt(heightStr as string) : undefined;
+  
+  if (width !== undefined && isNaN(width)) {
+    throw new Error('Invalid width value');
+  }
+  if (height !== undefined && isNaN(height)) {
+    throw new Error('Invalid height value');
+  }
+  
+  const backdropData = {
+    name: name as string,
+    userId: userId as string,
+    storagePath: storagePath,
+    width: width || 1920,  // Use defaults if not provided
+    height: height || 1080,
+  };
+  
+  return apiRequest('/api/backdrops', {
+    method: 'POST',
+    body: JSON.stringify(backdropData),
+  });
+}
