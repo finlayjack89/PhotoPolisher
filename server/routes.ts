@@ -73,6 +73,66 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
     }
   });
 
+  // --- NEW FILE SERVICE ENDPOINTS (Opaque ID-based) ---
+
+  app.post("/api/files", (req: Request, res: Response) => {
+    upload.single("file")(req, res, async (err) => {
+      if (err) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: "File size exceeds 20MB limit" });
+        }
+        console.error("Multer error:", err);
+        return res.status(400).json({ error: "File upload failed" });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      try {
+        const timestamp = Date.now();
+        const sanitizedFilename = req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const storageKey = `uploads/${timestamp}-${sanitizedFilename}`;
+
+        const file = await storage.createFile({
+          storageKey,
+          mimeType: req.file.mimetype,
+          bytes: req.file.buffer.length,
+          originalFilename: req.file.originalname,
+        }, req.file.buffer);
+
+        const publicUrl = `/api/files/${file.id}`;
+        
+        res.json({ 
+          fileId: file.id, 
+          publicUrl,
+          bytes: file.bytes,
+          mimeType: file.mimeType,
+        });
+      } catch (error) {
+        console.error("File creation error:", error);
+        res.status(500).json({ error: "Failed to create file" });
+      }
+    });
+  });
+
+  app.get("/api/files/:fileId", async (req: Request, res: Response) => {
+    try {
+      const fileData = await storage.getFile(req.params.fileId);
+
+      if (!fileData) {
+        return res.status(404).json({ error: "File not found" });
+      }
+
+      res.setHeader("Content-Type", fileData.file.mimeType);
+      res.setHeader("Content-Length", fileData.file.bytes.toString());
+      res.send(fileData.buffer);
+    } catch (error) {
+      console.error("File retrieval error:", error);
+      res.status(500).json({ error: "Failed to retrieve file" });
+    }
+  });
+
   // --- NEW JOB QUEUE ENDPOINTS (NO AUTH) ---
 
   app.post("/api/process-image", express.json(), async (req: Request, res: Response) => {
