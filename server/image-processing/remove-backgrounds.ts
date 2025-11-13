@@ -65,22 +65,31 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
         const imageResponse = await fetch(outputUrl);
         const imageBuffer = await imageResponse.arrayBuffer();
         const base64 = Buffer.from(imageBuffer).toString('base64');
+        const transparentDataUrl = `data:image/png;base64,${base64}`;
         
         processedImages.push({
           name: image.name,
-          transparentData: `data:image/png;base64,${base64}`,
+          transparentData: transparentDataUrl,
+          size: imageBuffer.byteLength,
         });
         
-        console.log(`✅ Successfully removed background from ${image.name}`);
+        console.log(`✅ Successfully removed background from ${image.name} (${imageBuffer.byteLength} bytes)`);
       } else {
         throw new Error(`Background removal failed: ${result.status}`);
       }
 
     } catch (error) {
       console.error(`Error processing ${image.name}:`, error);
+      
+      // Calculate size from the original base64 data
+      // Remove data URL prefix if present (e.g., "data:image/png;base64,")
+      const base64String = image.data.includes(',') ? image.data.split(',')[1] : image.data;
+      const estimatedBytes = Math.ceil((base64String.length * 3) / 4);
+      
       processedImages.push({
         name: image.name,
         transparentData: image.data,
+        size: estimatedBytes,
         error: error instanceof Error ? error.message : 'Unknown error',
       });
     }

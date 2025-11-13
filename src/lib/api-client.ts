@@ -37,7 +37,7 @@ export const api = {
    * Single-file background removal helper
    * Converts a File to base64 and calls the removeBackgrounds endpoint
    */
-  removeBackground: async (file: File): Promise<{ success: boolean; images: Array<{ name: string; transparentData: string; error?: string }> }> => {
+  removeBackground: async (file: File): Promise<{ success: boolean; images: Array<{ name: string; transparentData: string; size: number; error?: string }> }> => {
     // Convert File to base64 data URL
     const base64Data = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();

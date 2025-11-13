@@ -63,6 +63,13 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
         const result = await api.removeBackground(file);
 
         if (result?.images && result.images.length > 0) {
+          const processedImage = result.images[0];
+          
+          // Check if the backend returned an error flag
+          if (processedImage.error) {
+            throw new Error(processedImage.error);
+          }
+          
           // Read original file as data URL for originalData
           const originalDataUrl = await new Promise<string>((resolve) => {
             const reader = new FileReader();
@@ -71,10 +78,10 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
           });
 
           return {
-            name: result.images[0].name,
+            name: processedImage.name,
             originalData: originalDataUrl,
-            backgroundRemovedData: result.images[0].transparentData,
-            size: result.images[0].size || 0,
+            backgroundRemovedData: processedImage.transparentData,
+            size: processedImage.size,
             originalSize: file.size
           };
         } else {
