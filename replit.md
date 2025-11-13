@@ -98,3 +98,79 @@ Preferred communication style: Simple, everyday language.
 - Size used for compression warnings and UI display
 
 **Effect**: Background removal now works end-to-end with proper retry logic, accurate file sizes, and correct error handling.
+
+### November 13, 2025 - Comprehensive API Timeout & Edge Case Hardening
+
+**Problem**: External API integrations (Replicate, Gemini) were prone to timeouts, stuck jobs, and failures on unexpected response structures. Users experienced:
+1. Backdrop library not loading uploaded backdrops
+2. AI floor analysis failing or timing out
+3. Background removal stuck in processing state
+4. Jobs failing on valid but unusual API response formats
+
+**Root Causes**:
+1. Missing `getBackdrops()` function in API client
+2. No timeout handling on Replicate/Gemini API requests
+3. Brittle URL extraction from Replicate responses (only handled simple string cases)
+4. Direct array indexing in Gemini parsing (missed text when first part was inline_data)
+5. No exponential backoff on Replicate polling
+
+**Solution** (comprehensive 3-part fix):
+
+**1. Backdrop Library** (`src/lib/api-client.ts`):
+   - Added `getBackdrops(userId)` function to fetch user backdrops
+   - Frontend can now properly load and display uploaded backdrops
+
+**2. Replicate API Hardening** (`server/image-processing/remove-backgrounds.ts`):
+   - **Timeout Control**:
+     - 30-second request timeout on all API calls
+     - 2-minute maximum polling duration
+     - Exponential backoff: 1s → 2.5s → 3.75s → 5s between polls
+   - **Comprehensive URL Extraction** (handles ALL documented formats):
+     - Direct string: `result.output = "https://..."`
+     - Array of strings: `result.output = ["https://..."]`
+     - Array of objects: `result.output = [{url: "..."}, {href: "..."}, {path: "..."}]`
+     - Nested files: `result.output = {files: [{url: "..."}, ...]}`
+     - Mixed arrays: `result.output = ["string", {url: "..."}, null, {href: "..."}]`
+   - **Defensive Logic**:
+     - Iterates through ALL array entries checking string/url/href/path
+     - Validates extracted URL is actually a string before fetching
+     - Explicit error on empty arrays
+     - Logs full structure for unexpected formats
+
+**3. Gemini API Hardening** (`server/image-processing/analyze-images.ts`):
+   - **Timeout**: 30-second request timeout on all Gemini calls
+   - **Defensive Text Extraction** (both functions use same pattern):
+     - `analyzeImages()`: Finds first text part, skips inline_data
+     - `analyzeBackdrop()`: Finds first text part, skips inline_data
+   - **Graceful Fallback**:
+     - Validates candidate structure exists
+     - Returns default values on invalid structure
+     - Logs warnings for debugging
+
+**Error Messaging**:
+- ❌ emoji for missing API keys with clear setup instructions
+- Explicit timeout messages
+- Polling progress shows attempt count + elapsed time
+- Unexpected structures logged with full JSON for debugging
+
+**Architecture Decision**: Comprehensive defensive parsing
+- Handles all documented Replicate response formats
+- Prevents valid API responses from being rejected
+- Gracefully degrades on unexpected formats with useful logs
+- Consistent timeout + retry pattern across all external APIs
+
+**Edge Cases Covered**:
+✅ Replicate returns array with URL in non-first position
+✅ Replicate returns objects with href/path instead of url
+✅ Replicate returns nested {files: [...]} structure
+✅ Gemini returns inline_data as first part (image echo)
+✅ API requests timeout after 30s
+✅ Polling stops after 2 minutes
+✅ Missing API keys surface clear errors
+✅ Empty/null/invalid responses handled gracefully
+
+**Effect**: All external API integrations are now production-ready with comprehensive timeout handling, defensive parsing, and graceful error recovery. Users can reliably:
+- Upload and select custom backdrops
+- Run AI floor analysis without timeouts
+- Process background removal without stuck jobs
+- Handle all documented API response formats
