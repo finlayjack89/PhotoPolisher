@@ -1,12 +1,7 @@
 // server/db.ts
 import { Pool, neonConfig } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-serverless';
-
-// --- THIS IS THE FIX ---
-// Import 'ws' using CommonJS-compatible syntax
-import ws = require('ws');
-// --- END OF FIX ---
-
+import ws from 'ws';
 import * as schema from "@shared/schema";
 
 neonConfig.webSocketConstructor = ws;

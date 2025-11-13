@@ -38,6 +38,11 @@ const Library = () => {
   const { data: batches = [], isLoading: loading } = useQuery<ProjectBatch[]>({
     queryKey: ['/api/batches', user?.id],
     enabled: !!user,
+    queryFn: async () => {
+      // TODO: Implement /api/batches endpoint
+      // For now, return empty array
+      return [];
+    },
   });
 
   const deleteBatch = async (batchId: string) => {

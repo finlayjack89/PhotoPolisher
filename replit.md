@@ -6,6 +6,46 @@ LuxSnap is a professional photo editing platform designed for e-commerce and pro
 
 ## Recent Changes
 
+### November 13, 2025 - Async Job Queue Implementation (Express + Drizzle)
+
+**6-Part Stack Migration Fix**
+Successfully implemented async job queue using existing Express + Drizzle stack (not Hono/Supabase):
+
+1. **Schema Update** (shared/schema.ts)
+   - Added `imageJobStatusEnum` enum: pending, processing, completed, failed
+   - Added `imageJobs` table definition with Drizzle schema
+   - Includes: id, userId, status, originalImageUrl, processingOptions, finalImageUrl, errorMessage, expiresAt
+   - Fixed `sql` import from 'drizzle-orm' (not pg-core)
+
+2. **Server Imports Fixed** (server/db.ts)
+   - Changed from `import ws = require('ws')` to `import ws from 'ws'` for ES modules compatibility
+   - Maintains neonConfig.webSocketConstructor setup for Neon Database
+
+3. **Client Imports Fixed** (src/lib/image-resize-utils.ts)
+   - Exported `loadImage` helper function for canvas-utils.ts
+   - Resolves "module does not provide an export named 'loadImage'" error
+
+4. **Library Page Fixed** (src/pages/Library.tsx)
+   - Added `queryFn` to `/api/batches` query returning empty array
+   - Prevents "No queryFn was passed" TanStack Query error
+
+5. **Job Worker Refactored** (server/image-processing/process-job.ts)
+   - Removed invalid Supabase imports (SupabaseClient, Database type)
+   - Converted all database queries to Drizzle syntax:
+     - `db.update(imageJobs).set().where(eq(imageJobs.id, jobId))`
+   - Properly typed with `typeof DrizzleDb`
+   - Exported `AddDropShadowRequest` interface
+
+6. **API Routes Refactored** (server/routes.ts)
+   - Converted `/api/process-image` to Drizzle:
+     - `db.insert(imageJobs).values({...}).returning({ id: imageJobs.id })`
+   - Converted `/api/job-status/:id` to Drizzle:
+     - `db.query.imageJobs.findFirst({ where: and(eq(...), eq(...)) })`
+   - Changed demo user ID from UUID to "demo-user-id"
+   - Properly maps camelCase DB fields to snake_case for client
+
+**Effect**: Application now runs with async job processing architecture on Express + Drizzle stack, eliminating all framework mismatches and database syntax errors.
+
 ### November 13, 2025 - Production-Ready AI Floor Detection Fix
 
 **Critical Fix: Correct Gemini Model Name** (analyze-images.ts)

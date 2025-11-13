@@ -2,7 +2,7 @@ import fetch from 'node-fetch';
 import FormData from 'form-data';
 import crypto from 'crypto';
 
-interface AddDropShadowRequest {
+export interface AddDropShadowRequest {
   images?: Array<{
     data: string;
     name: string;
@@ -12,7 +12,7 @@ interface AddDropShadowRequest {
   azimuth?: number;
   elevation?: number;
   spread?: number;
-  opacity?: number; // <-- ADDED
+  opacity?: number;
 }
 
 async function generateSignature(stringToSign: string, apiSecret: string): Promise<string> {

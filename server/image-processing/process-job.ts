@@ -1,8 +1,9 @@
 // server/image-processing/process-job.ts
-import { type Database } from '../../shared/schema';
-import { type SupabaseClient } from '@supabase/supabase-js';
+import type { db as DrizzleDb } from '../db';
+import { imageJobs } from '../../shared/schema';
+import { eq } from 'drizzle-orm';
 import { addDropShadow } from './add-drop-shadow';
-import type { AddDropShadowRequest } from './add-drop-shadow'; // <-- Import the type
+import type { AddDropShadowRequest } from './add-drop-shadow';
 
 // Define the shape of our options
 interface ProcessingOptions {
@@ -15,7 +16,7 @@ interface ProcessingOptions {
   reflection?: any; // Server ignores this
 }
 
-type AppDatabase = SupabaseClient<Database>;
+type AppDatabase = typeof DrizzleDb;
 
 export async function processJob(
   jobId: string,
@@ -26,9 +27,9 @@ export async function processJob(
   try {
     // 1. Set job to 'processing'
     await db
-      .from('image_jobs')
-      .update({ status: 'processing' })
-      .eq('id', jobId);
+      .update(imageJobs)
+      .set({ status: 'processing' })
+      .where(eq(imageJobs.id, jobId));
 
     console.log(`[Job ${jobId}] Starting...`);
 
@@ -42,7 +43,6 @@ export async function processJob(
 
     console.log(`[Job ${jobId}] Adding drop shadow...`);
 
-    // --- MODIFIED CALL ---
     // Create the request object that addDropShadow expects
     const shadowRequest: AddDropShadowRequest = {
       images: [{ data: cleanCutoutDataUrl, name: "job_" + jobId }],
@@ -59,28 +59,27 @@ export async function processJob(
     }
 
     const shadowedSubjectUrl = shadowResult.images[0].shadowedData;
-    // --- END MODIFIED CALL ---
 
     console.log(`[Job ${jobId}] Shadow added. Job complete.`);
 
-    // 4. Update job to 'completed'
+    // 3. Update job to 'completed'
     await db
-      .from('image_jobs')
-      .update({
+      .update(imageJobs)
+      .set({
         status: 'completed',
-        final_image_url: shadowedSubjectUrl, // This is what the client needs
+        finalImageUrl: shadowedSubjectUrl,
       })
-      .eq('id', jobId);
+      .where(eq(imageJobs.id, jobId));
 
   } catch (error) {
     console.error(`[Job ${jobId}] Processing failed:`, error);
-    // 5. Update job to 'failed'
+    // 4. Update job to 'failed'
     await db
-      .from('image_jobs')
-      .update({
+      .update(imageJobs)
+      .set({
         status: 'failed',
-        error_message: error instanceof Error ? error.message : 'Unknown error',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
       })
-      .eq('id', jobId);
+      .where(eq(imageJobs.id, jobId));
   }
 }

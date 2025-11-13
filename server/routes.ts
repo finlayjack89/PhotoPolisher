@@ -1,9 +1,10 @@
 // server/routes.ts
 import express, { type Request, type Response } from "express";
 import type { IStorage } from "./storage";
-import { insertUserQuotaSchema, insertProcessingCacheSchema, insertBackdropLibrarySchema, insertBatchImageSchema } from "@shared/schema";
-import { getDb } from "./db"; // <-- ADDED
-import { processJob } from "./image-processing/process-job"; // <-- ADDED
+import { insertUserQuotaSchema, insertProcessingCacheSchema, insertBackdropLibrarySchema, insertBatchImageSchema, imageJobs } from "@shared/schema";
+import { getDb } from "./db";
+import { processJob } from "./image-processing/process-job";
+import { eq, and } from "drizzle-orm";
 
 // This function signature matches your original file
 export function registerRoutes(app: express.Application, storage: IStorage) {
@@ -11,9 +12,9 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
   // --- NEW JOB QUEUE ENDPOINTS (NO AUTH) ---
 
   app.post("/api/process-image", express.json(), async (req: Request, res: Response) => {
-    const db = getDb(); // Get DB instance
+    const db = getDb();
     // Since auth is a stub, we'll use a hardcoded user ID
-    const demoUserId = "00000000-0000-0000-0000-000000000001";
+    const demoUserId = "demo-user-id";
     const { original_image_url, processing_options } = req.body;
 
     if (!original_image_url) {
@@ -22,23 +23,21 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
 
     try {
       // 1. Create the job in the database
-      const { data: job, error } = await db
-        .from('image_jobs')
-        .insert({
-          user_id: demoUserId, // Use demo user
-          original_image_url,
-          processing_options,
+      const [job] = await db
+        .insert(imageJobs)
+        .values({
+          userId: demoUserId,
+          originalImageUrl: original_image_url,
+          processingOptions: processing_options,
           status: 'pending',
         })
-        .select('id')
-        .single();
+        .returning({ id: imageJobs.id });
 
-      if (error) {
-        console.error('Failed to create job:', error);
-        throw new Error(error.message);
+      if (!job) {
+        throw new Error('Failed to create job');
       }
 
-      const { id: jobId } = job;
+      const jobId = job.id;
 
       // 2. Start the job in the background (DO NOT AWAIT)
       processJob(jobId, db, original_image_url, processing_options);
@@ -54,7 +53,7 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
 
   app.get("/api/job-status/:id", async (req: Request, res: Response) => {
     const db = getDb();
-    const demoUserId = "00000000-0000-0000-0000-000000000001";
+    const demoUserId = "demo-user-id";
     const jobId = req.params.id;
 
     if (!jobId) {
@@ -62,19 +61,29 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
     }
 
     try {
-      const { data: job, error } = await db
-        .from('image_jobs')
-        .select('status, final_image_url, error_message')
-        .eq('id', jobId)
-        .eq('user_id', demoUserId) // Security: User can only poll their own job
-        .single();
+      const job = await db.query.imageJobs.findFirst({
+        where: and(
+          eq(imageJobs.id, jobId),
+          eq(imageJobs.userId, demoUserId)
+        ),
+        columns: {
+          status: true,
+          finalImageUrl: true,
+          errorMessage: true,
+        },
+      });
 
-      if (error || !job) {
+      if (!job) {
         console.warn(`Job not found or permission error for job ${jobId}`);
         return res.status(404).json({ error: 'Job not found' });
       }
 
-      res.json(job);
+      // Map to snake_case for client compatibility
+      res.json({
+        status: job.status,
+        final_image_url: job.finalImageUrl,
+        error_message: job.errorMessage,
+      });
 
     } catch (err) {
       console.error(`Error fetching job status for ${jobId}:`, err);

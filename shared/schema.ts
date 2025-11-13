@@ -1,10 +1,12 @@
 import { pgTable, uuid, text, integer, jsonb, timestamp, pgEnum } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Enums
 export const processingStatusEnum = pgEnum('processing_status', ['pending', 'processing', 'completed', 'failed', 'cancelled']);
 export const operationTypeEnum = pgEnum('operation_type', ['upscale', 'compress', 'thumbnail', 'format_convert', 'batch', 'composite']);
+export const imageJobStatusEnum = pgEnum('image_job_status', ['pending', 'processing', 'completed', 'failed']);
 
 // User Quotas Table
 export const userQuotas = pgTable('user_quotas', {
@@ -84,3 +86,20 @@ export const batchImages = pgTable('batch_images', {
 export const insertBatchImageSchema = createInsertSchema(batchImages).omit({ id: true, createdAt: true });
 export type InsertBatchImage = z.infer<typeof insertBatchImageSchema>;
 export type BatchImage = typeof batchImages.$inferSelect;
+
+// Image Jobs Table (for async processing queue)
+export const imageJobs = pgTable('image_jobs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  status: imageJobStatusEnum('status').default('pending').notNull(),
+  originalImageUrl: text('original_image_url'),
+  processingOptions: jsonb('processing_options'),
+  finalImageUrl: text('final_image_url'),
+  errorMessage: text('error_message'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).default(sql`NOW() + INTERVAL '1 hour'`),
+});
+
+export const insertImageJobSchema = createInsertSchema(imageJobs).omit({ id: true, createdAt: true });
+export type InsertImageJob = z.infer<typeof insertImageJobSchema>;
+export type ImageJob = typeof imageJobs.$inferSelect;
