@@ -33,6 +33,31 @@ export const api = {
     body: JSON.stringify(data),
   }),
 
+  /**
+   * Single-file background removal helper
+   * Converts a File to base64 and calls the removeBackgrounds endpoint
+   */
+  removeBackground: async (file: File): Promise<{ success: boolean; images: Array<{ name: string; transparentData: string; error?: string }> }> => {
+    // Convert File to base64 data URL
+    const base64Data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    // Call the removeBackgrounds endpoint with single image
+    return apiRequest('/api/remove-backgrounds', {
+      method: 'POST',
+      body: JSON.stringify({
+        images: [{
+          data: base64Data,
+          name: file.name,
+        }],
+      }),
+    });
+  },
+
   addDropShadow: (data: any) => apiRequest('/api/add-drop-shadow', {
     method: 'POST',
     body: JSON.stringify(data),
