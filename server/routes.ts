@@ -1,5 +1,6 @@
 // server/routes.ts
 import express, { type Request, type Response } from "express";
+import multer from "multer";
 import type { IStorage } from "./storage";
 import { insertUserQuotaSchema, insertProcessingCacheSchema, insertBackdropLibrarySchema, insertBatchImageSchema, imageJobs } from "@shared/schema";
 import { getDb } from "./db";
@@ -8,6 +9,69 @@ import { eq, and } from "drizzle-orm";
 
 // This function signature matches your original file
 export function registerRoutes(app: express.Application, storage: IStorage) {
+
+  // --- MULTER CONFIGURATION FOR FILE UPLOADS ---
+  const upload = multer({ 
+    storage: multer.memoryStorage(),
+    limits: {
+      fileSize: 20 * 1024 * 1024, // 20MB max file size
+      files: 1 // Only allow 1 file per upload
+    }
+  });
+
+  // --- FILE UPLOAD ENDPOINTS ---
+
+  app.post("/api/upload", (req: Request, res: Response) => {
+    upload.single("file")(req, res, async (err) => {
+      // Handle multer errors
+      if (err) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: "File size exceeds 20MB limit" });
+        }
+        console.error("Multer error:", err);
+        return res.status(400).json({ error: "File upload failed" });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      try {
+        // Generate unique storage path
+        const timestamp = Date.now();
+        const sanitizedFilename = req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const storagePath = `uploads/${timestamp}-${sanitizedFilename}`;
+
+        // Save file to memory storage
+        await storage.saveFileToMemStorage(storagePath, req.file.buffer, req.file.mimetype);
+
+        // Return URL that can be used to retrieve the file
+        const url = `/uploads/${timestamp}-${sanitizedFilename}`;
+        
+        res.json({ url });
+      } catch (error) {
+        console.error("File upload error:", error);
+        res.status(500).json({ error: "Failed to upload file" });
+      }
+    });
+  });
+
+  app.get("/uploads/:filename", async (req: Request, res: Response) => {
+    try {
+      const storagePath = `uploads/${req.params.filename}`;
+      const file = await storage.getFileFromMemStorage(storagePath);
+
+      if (!file) {
+        return res.status(404).json({ error: "File not found" });
+      }
+
+      res.setHeader("Content-Type", file.mimeType);
+      res.send(file.buffer);
+    } catch (error) {
+      console.error("File retrieval error:", error);
+      res.status(500).json({ error: "Failed to retrieve file" });
+    }
+  });
 
   // --- NEW JOB QUEUE ENDPOINTS (NO AUTH) ---
 
