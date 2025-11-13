@@ -6,7 +6,14 @@ LuxSnap is a professional photo editing platform designed for e-commerce and pro
 
 ## Recent Changes
 
-### November 12, 2025 - Production-Ready AI Floor Detection Fix
+### November 13, 2025 - Production-Ready AI Floor Detection Fix
+
+**Critical Fix: Correct Gemini Model Name** (analyze-images.ts)
+- Fixed Gemini API endpoint from incorrect `gemini-2.5-flash-image-preview` to correct `gemini-2.5-flash`
+- The incorrect model name was causing 400 errors: "JSON mode is not enabled for this model"
+- This was preventing JSON mode from working and causing AI to default to 0.75
+- With correct model name, `responseMimeType: 'application/json'` now works as intended
+- Effect: AI floor detection should now return accurate floorY values instead of defaulting to 0.75
 
 **Phase 1A: Robust JSON Parsing for AI Floor Detection** (analyze-images.ts)
 - Implemented production-ready `analyzeBackdrop` function with comprehensive JSON parsing
