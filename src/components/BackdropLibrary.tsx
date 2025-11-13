@@ -22,7 +22,8 @@ interface Backdrop {
   id: string;
   userId: string;
   name: string;
-  storagePath: string;
+  storagePath?: string;
+  fileId?: string;
   width: number;
   height: number;
   createdAt: Date;
@@ -56,27 +57,30 @@ export const BackdropLibrary = ({
     enabled: !!user,
   });
 
-  // Load image URLs from memory storage
+  // Load image URLs
   useEffect(() => {
-    const loadImages = async () => {
-      for (const backdrop of backdrops) {
-        if (!imageUrls[backdrop.id]) {
-          try {
-            const response = await fetch(`/api/get-memstorage-file?path=${encodeURIComponent(backdrop.storagePath)}`);
-            if (response.ok) {
-              const blob = await response.blob();
-              const url = URL.createObjectURL(blob);
-              setImageUrls(prev => ({ ...prev, [backdrop.id]: url }));
-            }
-          } catch (error) {
-            console.error(`Failed to load image for backdrop ${backdrop.id}:`, error);
-          }
+    const urls: Record<string, string> = {};
+    
+    for (const backdrop of backdrops) {
+      if (!imageUrls[backdrop.id]) {
+        let url: string;
+        
+        if (backdrop.fileId) {
+          // NEW: Use file ID endpoint directly
+          url = `/api/files/${backdrop.fileId}`;
+        } else if (backdrop.storagePath) {
+          // LEGACY: Use memory storage endpoint directly (no blob URL needed!)
+          url = `/api/get-memstorage-file?path=${encodeURIComponent(backdrop.storagePath)}`;
+        } else {
+          continue;
         }
+        
+        urls[backdrop.id] = url;
       }
-    };
-
-    if (backdrops.length > 0) {
-      loadImages();
+    }
+    
+    if (Object.keys(urls).length > 0) {
+      setImageUrls(prev => ({ ...prev, ...urls }));
     }
   }, [backdrops]);
 

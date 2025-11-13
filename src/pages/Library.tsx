@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Download, Trash2, Edit, FolderOpen, Image as ImageIcon } from 'lucide-react';
@@ -13,7 +13,8 @@ interface BatchImage {
   id: string;
   name: string;
   image_type: 'transparent' | 'ai_enhanced' | 'final';
-  storage_path: string;
+  storage_path?: string;
+  fileId?: string;
   file_size: number;
   dimensions: { width: number; height: number };
   sort_order: number;
@@ -33,7 +34,7 @@ const Library = () => {
   const { toast } = useToast();
   const { user } = useAuth();
   const [selectedBatch, setSelectedBatch] = useState<ProjectBatch | null>(null);
-  const [imageUrls] = useState<Record<string, string>>({});
+  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
 
   const { data: batches = [], isLoading: loading } = useQuery<ProjectBatch[]>({
     queryKey: ['/api/batches', user?.id],
@@ -44,6 +45,35 @@ const Library = () => {
       return [];
     },
   });
+
+  // Load image URLs when batch is selected
+  useEffect(() => {
+    if (!selectedBatch) return;
+    
+    const urls: Record<string, string> = {};
+    
+    for (const image of selectedBatch.images) {
+      if (!imageUrls[image.id]) {
+        let url: string;
+        
+        if (image.fileId) {
+          // NEW: Use file ID endpoint directly
+          url = `/api/files/${image.fileId}`;
+        } else if (image.storage_path) {
+          // LEGACY: Use memory storage endpoint directly (no blob URL needed!)
+          url = `/api/get-memstorage-file?path=${encodeURIComponent(image.storage_path)}`;
+        } else {
+          continue;
+        }
+        
+        urls[image.id] = url;
+      }
+    }
+    
+    if (Object.keys(urls).length > 0) {
+      setImageUrls(prev => ({ ...prev, ...urls }));
+    }
+  }, [selectedBatch]);
 
   const deleteBatch = async (batchId: string) => {
     try {

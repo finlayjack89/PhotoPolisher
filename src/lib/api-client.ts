@@ -129,7 +129,7 @@ export const api = {
 
 /**
  * Upload a backdrop file (two-step process)
- * Step 1: Upload file to /api/upload to get storage URL
+ * Step 1: Upload file to /api/upload to get BOTH legacy path and new file ID
  * Step 2: Create backdrop entry in database with metadata
  * @returns The created backdrop object from the server
  */
@@ -182,10 +182,11 @@ export async function uploadBackdrop(formData: FormData): Promise<any> {
     throw new Error('Invalid response from upload endpoint');
   }
   
-  const storagePath = uploadResult.url;
+  const fileId = uploadResult.fileId;
+  const legacyPath = uploadResult.url;
   
-  if (!storagePath) {
-    throw new Error('Upload response missing URL');
+  if (!fileId) {
+    throw new Error('Upload response missing file ID');
   }
   
   // Step 2: Create backdrop entry in database with validation
@@ -208,13 +209,18 @@ export async function uploadBackdrop(formData: FormData): Promise<any> {
     throw new Error('Invalid height value');
   }
   
-  const backdropData = {
+  const backdropData: any = {
     name: name as string,
     userId: userId as string,
-    storagePath: storagePath,
-    width: width || 1920,  // Use defaults if not provided
+    fileId: fileId,               // NEW: Primary file identifier
+    width: width || 1920,
     height: height || 1080,
   };
+  
+  // MIGRATION: Include legacy path if available (backend may still require it)
+  if (legacyPath) {
+    backdropData.storagePath = legacyPath;
+  }
   
   return apiRequest('/api/backdrops', {
     method: 'POST',
