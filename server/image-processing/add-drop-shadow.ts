@@ -12,6 +12,7 @@ interface AddDropShadowRequest {
   azimuth?: number;
   elevation?: number;
   spread?: number;
+  opacity?: number; // <-- ADDED
 }
 
 async function generateSignature(stringToSign: string, apiSecret: string): Promise<string> {
@@ -27,12 +28,12 @@ export async function addDropShadow(req: AddDropShadowRequest) {
     throw new Error('Cloudinary credentials not configured');
   }
 
-  const { images, uploadPreview, image, azimuth = 0, elevation = 90, spread = 5 } = req;
+  const { images, uploadPreview, image, azimuth = 0, elevation = 90, spread = 5, opacity = 75 } = req; // <-- ADDED opacity
 
   // Handle preview upload
   if (uploadPreview && image) {
     console.log('Uploading preview image to Cloudinary...');
-    
+
     const timestamp = Math.floor(Date.now() / 1000);
     const folder = 'shadow_preview_temp';
     const signatureString = `folder=${folder}&timestamp=${timestamp}${apiSecret}`;
@@ -67,12 +68,12 @@ export async function addDropShadow(req: AddDropShadowRequest) {
       cloudName: cloudName
     };
   }
-  
+
   if (!images || !Array.isArray(images) || images.length === 0) {
     throw new Error('No images provided');
   }
 
-  console.log(`Processing ${images.length} images for drop shadow with params: azimuth=${azimuth}, elevation=${elevation}, spread=${spread}`);
+  console.log(`Processing ${images.length} images for drop shadow with params: azimuth=${azimuth}, elevation=${elevation}, spread=${spread}, opacity=${opacity}`); // <-- ADDED opacity log
 
   const processedImages = [];
 
@@ -87,9 +88,7 @@ export async function addDropShadow(req: AddDropShadowRequest) {
       const uploadSignature = await generateSignature(signatureString, apiSecret);
 
       const uploadData = new FormData();
-      // Strip the data URL prefix to send only the base64 string
-      const base64Data = img.data.replace(/^data:image\/[a-z]+;base64,/, '');
-      uploadData.append('file', `data:image/png;base64,${base64Data}`);
+      uploadData.append('file', img.data);
       uploadData.append('api_key', apiKey);
       uploadData.append('timestamp', timestamp.toString());
       uploadData.append('signature', uploadSignature);
@@ -116,54 +115,25 @@ export async function addDropShadow(req: AddDropShadowRequest) {
 
       const paddingMultiplier = Math.max(1.5, 1 + (spread / 100));
       console.log(`Using padding multiplier: ${paddingMultiplier}x for spread: ${spread}`);
-      
-      // Dual-layer shadow for more realistic, professional results
-      // Layer 1: Soft, diffuse shadow (gray)
-      // Layer 2: Sharp contact shadow (black)
-      const transformedUrl = `https://res.cloudinary.com/${cloudName}/image/upload/c_lpad,w_iw_mul_${paddingMultiplier},h_ih_mul_${paddingMultiplier},b_transparent/e_shadow:50,x_5,y_10,co_rgb:444444/e_shadow:40,x_5,y_10,co_rgb:000000,r_5/${uploadResult.public_id}.png`;
-      
-      console.log(`Transformation URL (dual-layer shadow): ${transformedUrl}`);
 
-      // Fetch transformed image with retry logic (Cloudinary transformations can take time on first request)
-      let transformedResponse;
-      let retries = 3;
-      let lastError;
-      
-      for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-          console.log(`Fetching transformed image (attempt ${attempt}/${retries})...`);
-          transformedResponse = await fetch(transformedUrl, {
-            signal: AbortSignal.timeout(30000) // 30 second timeout per attempt
-          });
-          
-          if (transformedResponse.ok) {
-            break; // Success!
-          } else if (attempt === retries) {
-            throw new Error(`Failed to fetch transformed image: ${transformedResponse.status}`);
-          }
-          
-          console.warn(`Attempt ${attempt} failed with status ${transformedResponse.status}, retrying...`);
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
-        } catch (error) {
-          lastError = error;
-          if (attempt === retries) {
-            throw new Error(`Failed to fetch transformed image after ${retries} attempts: ${error instanceof Error ? error.message : 'Unknown error'}`);
-          }
-          console.warn(`Attempt ${attempt} failed:`, error instanceof Error ? error.message : 'Unknown error', '- retrying...');
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
+      // --- MODIFIED LINE ---
+      // Added opacity (co_rgb:000,o_OPACITY) to the drop shadow effect
+      const transformedUrl = `https://res.cloudinary.com/${cloudName}/image/upload/c_lpad,w_iw_mul_${paddingMultiplier},h_ih_mul_${paddingMultiplier},b_transparent/e_dropshadow:azimuth_${azimuth};elevation_${elevation};spread_${spread},co_rgb:000,o_${opacity}/${uploadResult.public_id}.png`;
+      // --- END MODIFIED LINE ---
+
+      console.log(`Transformation URL: ${transformedUrl}`);
+
+      const transformedResponse = await fetch(transformedUrl);
+
+      if (!transformedResponse.ok) {
+        throw new Error(`Failed to fetch transformed image: ${transformedResponse.status}`);
       }
 
-      if (!transformedResponse || !transformedResponse.ok) {
-        throw new Error(`Failed to fetch transformed image after all retries`);
-      }
-
-      console.log(`✅ Fetched transformed image successfully`);
       const transformedBuffer = await transformedResponse.arrayBuffer();
       const base64 = Buffer.from(transformedBuffer).toString('base64');
-      
+
       const shadowedDataUrl = `data:image/png;base64,${base64}`;
-      
+
       processedImages.push({
         name: img.name,
         shadowedData: shadowedDataUrl,
@@ -176,7 +146,7 @@ export async function addDropShadow(req: AddDropShadowRequest) {
         const deleteTimestamp = Math.floor(Date.now() / 1000);
         const deleteSignatureString = `public_id=${uploadResult.public_id}&timestamp=${deleteTimestamp}${apiSecret}`;
         const deleteSignature = await generateSignature(deleteSignatureString, apiSecret);
-        
+
         const deleteData = new FormData();
         deleteData.append('public_id', uploadResult.public_id);
         deleteData.append('signature', deleteSignature);
@@ -190,7 +160,7 @@ export async function addDropShadow(req: AddDropShadowRequest) {
             body: deleteData,
           }
         );
-        
+
         if (deleteResponse.ok) {
           console.log(`🗑️ Cleaned up temporary Cloudinary image: ${uploadResult.public_id}`);
         }

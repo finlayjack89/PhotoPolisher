@@ -2,6 +2,7 @@
 import { type Database } from '../../shared/schema';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { addDropShadow } from './add-drop-shadow';
+import type { AddDropShadowRequest } from './add-drop-shadow'; // <-- Import the type
 
 // Define the shape of our options
 interface ProcessingOptions {
@@ -16,15 +17,10 @@ interface ProcessingOptions {
 
 type AppDatabase = SupabaseClient<Database>;
 
-/**
- * This function runs in the background.
- * It is NOT awaited by the API route.
- * It updates the Supabase table with progress.
- */
 export async function processJob(
   jobId: string,
-  db: AppDatabase, // Pass the server's Supabase client
-  cleanCutoutDataUrl: string, // This is the original_image_url from the job
+  db: AppDatabase,
+  cleanCutoutDataUrl: string,
   options: ProcessingOptions,
 ) {
   try {
@@ -41,17 +37,30 @@ export async function processJob(
       azimuth: 135,
       elevation: 45,
       spread: 10,
-      opacity: 0.5,
+      opacity: 75,
     };
 
     console.log(`[Job ${jobId}] Adding drop shadow...`);
-    const shadowedSubjectUrl = await addDropShadow(
-      cleanCutoutDataUrl,
-      shadowOptions.azimuth,
-      shadowOptions.elevation,
-      shadowOptions.spread,
-      shadowOptions.opacity,
-    );
+
+    // --- MODIFIED CALL ---
+    // Create the request object that addDropShadow expects
+    const shadowRequest: AddDropShadowRequest = {
+      images: [{ data: cleanCutoutDataUrl, name: "job_" + jobId }],
+      azimuth: shadowOptions.azimuth,
+      elevation: shadowOptions.elevation,
+      spread: shadowOptions.spread,
+      opacity: shadowOptions.opacity,
+    };
+
+    const shadowResult = await addDropShadow(shadowRequest);
+
+    if (!shadowResult.success || !shadowResult.images || shadowResult.images.length === 0) {
+      throw new Error('Shadow generation failed');
+    }
+
+    const shadowedSubjectUrl = shadowResult.images[0].shadowedData;
+    // --- END MODIFIED CALL ---
+
     console.log(`[Job ${jobId}] Shadow added. Job complete.`);
 
     // 4. Update job to 'completed'

@@ -124,12 +124,14 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
   const [failedImages, setFailedImages] = useState<FailedImage[]>([]);
   const { toast } = useToast();
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isCancelled = useRef(false);
 
   useEffect(() => {
     startBatchProcessing();
 
     return () => {
       // Clear interval on component unmount
+      isCancelled.current = true;
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
@@ -142,7 +144,7 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
 
     // TODO: These options should be passed in via masterRules
     // from ProductConfiguration -> CommercialEditingWorkflow
-    const shadowOptions = { azimuth: 135, elevation: 45, spread: 10, opacity: 0.6 };
+    const shadowOptions = { azimuth: 135, elevation: 45, spread: 10, opacity: 75 };
     const reflectionOptions = { opacity: 0.4, falloff: 0.5 };
 
     // Store all rules
@@ -150,6 +152,7 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
     masterRules.reflectionOptions = reflectionOptions;
 
     for (const subject of subjects) {
+      if (isCancelled.current) return;
       const name = (subject as File).name || (subject as Subject).name;
       try {
         // --- Step 1: Get Cutout Data ---
@@ -178,7 +181,13 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
       }
     }
 
+    if (isCancelled.current) return;
     setJobs(newJobs);
+
+    if (newJobs.length === 0 && failedImages.length > 0) {
+      setCurrentStep("All jobs failed to start.");
+      return;
+    }
 
     if (newJobs.length === 0) {
       setCurrentStep("No jobs to process.");
@@ -194,6 +203,11 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
   };
 
   const pollJobsStatus = async (currentJobs: Job[]) => {
+    if (isCancelled.current) {
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        return;
+    }
+
     let completedCount = 0;
     let failedCount = 0;
     let needsUpdate = false;
@@ -201,17 +215,13 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
 
     if(activeJobs.length === 0) {
         if (intervalRef.current) clearInterval(intervalRef.current);
+        // All jobs are settled (completed or failed), move to composite
+        setCurrentStep("All server processing complete. Compositing images...");
+        finishCompositing(currentJobs);
         return;
     }
 
-    for (const job of currentJobs) {
-      if (job.status === 'completed' || job.status === 'failed') {
-        if (job.status === 'completed') completedCount++;
-        if (job.status === 'failed') failedCount++;
-        continue;
-      }
-
-      // Job is still pending or processing, check its status
+    for (const job of activeJobs) {
       try {
         const statusResult = await api.getJobStatus(job.jobId);
         if (statusResult.status !== job.status) {
@@ -220,11 +230,9 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
 
           if (statusResult.status === 'completed') {
             job.final_image_url = statusResult.final_image_url;
-            completedCount++;
           } else if (statusResult.status === 'failed') {
             job.error_message = statusResult.error_message;
             setFailedImages(prev => [...prev.filter(f => f.name !== job.name), { name: job.name, error: job.error_message || 'Job failed' }]);
-            failedCount++;
           }
         }
       } catch (error) {
@@ -232,31 +240,25 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
         job.status = 'failed';
         job.error_message = (error as Error).message;
         setFailedImages(prev => [...prev.filter(f => f.name !== job.name), { name: job.name, error: job.error_message }]);
-        failedCount++;
         needsUpdate = true;
       }
     }
 
+    // Recalculate counts after polling
+    completedCount = currentJobs.filter(j => j.status === 'completed').length;
+    failedCount = currentJobs.filter(j => j.status === 'failed').length;
     const totalProcessed = completedCount + failedCount;
-    setProgress((totalProcessed / jobs.length) * 100);
-    setCurrentStep(`Processing... ${totalProcessed} / ${jobs.length} complete.`);
+
+    setProgress((totalProcessed / currentJobs.length) * 100);
+    setCurrentStep(`Processing... ${totalProcessed} / ${currentJobs.length} complete.`);
 
     if (needsUpdate) {
       setJobs([...currentJobs]);
     }
-
-    // Check if all jobs are done
-    if (totalProcessed === jobs.length) {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-      setCurrentStep("All server processing complete. Compositing images...");
-      // Move to final client-side compositing
-      finishCompositing(currentJobs);
-    }
   };
 
   const finishCompositing = async (completedJobs: Job[]) => {
+    if (isCancelled.current) return;
     const finalResults: ProcessedImage[] = [];
 
     for (const [index, job] of completedJobs.entries()) {
@@ -324,9 +326,19 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
     setCurrentStep("Batch processing complete!");
     // Wait 1 sec before transitioning to gallery
     setTimeout(() => {
-      onComplete(finalResults);
+      if (!isCancelled.current) {
+        onComplete(finalResults);
+      }
     }, 1000);
   };
+
+  const handleBack = () => {
+    isCancelled.current = true;
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+    onBack();
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-secondary/20 flex items-center justify-center p-4">
@@ -381,7 +393,7 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
             </div>
           }
 
-          <Button variant="outline" onClick={onBack} className="w-full" data-testid="button-cancel-batch">
+          <Button variant="outline" onClick={handleBack} className="w-full" data-testid="button-cancel-batch">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Setup (This will cancel the batch)
           </Button>
