@@ -1,99 +1,121 @@
-// API client for making requests to the Express backend
+// src/lib/api-client.ts
+import { hc } from 'hono/client';
+import type app from '../../server/routes';
+import { createClient } from '@supabase/supabase-js';
+import { type Database } from 'shared/schema';
 
-export async function apiRequest<T = any>(endpoint: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(endpoint, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(error.error || `API request failed: ${response.status}`);
+// Supabase client singleton
+let supabase: ReturnType<typeof createClient<Database>>;
+export const getSupabase = () => {
+  if (!supabase) {
+    supabase = createClient<Database>(
+      import.meta.env.VITE_SUPABASE_URL!,
+      import.meta.env.VITE_SUPABASE_ANON_KEY!,
+    );
   }
+  return supabase;
+};
 
-  return response.json();
-}
-
-export async function apiUpload<T = any>(endpoint: string, formData: FormData): Promise<T> {
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Upload failed' }));
-    throw new Error(error.error || `Upload failed: ${response.status}`);
-  }
-
-  return response.json();
-}
-
-// New file upload functions
-export async function removeBackground(file: File) {
-  const formData = new FormData();
-  formData.append('image', file);
-  return apiUpload<any>('/api/remove-backgrounds', formData);
-}
-
-export async function uploadBackdrop(formData: FormData) {
-  return apiUpload<any>('/api/backdrops', formData);
-}
-
-export async function analyzeBackdrop(formData: FormData) {
-  return apiUpload<any>('/api/analyze-backdrop', formData);
-}
-
-export async function getBackdrops(userId: string) {
-  return apiRequest<any[]>(`/api/backdrops/${userId}`);
-}
+// Hono client
+const client = hc<typeof app>('/');
 
 export const api = {
-  // Image processing endpoints
-  removeBackgrounds: (data: any) => apiRequest('/api/remove-backgrounds', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
-  
-  removeBackground, // New single-file upload function
-  uploadBackdrop,
-  analyzeBackdrop,
-  getBackdrops,
-  
-  compressImages: (data: any) => apiRequest('/api/compress-images', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
-  
-  analyzeImages: (data: any) => apiRequest('/api/analyze-images', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
-  
-  addDropShadow: (data: any) => apiRequest('/api/add-drop-shadow', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
-  
-  upscaleImages: (data: any) => apiRequest('/api/upscale-images', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
-  
-  finalizeImage: (data: any) => apiRequest('/api/finalize-image', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
-  
-  generateMasks: (data: any) => apiRequest('/api/generate-masks', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
-  
-  convertFileToPng: (data: any) => apiRequest('/api/convert-file-to-png', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
+  /**
+   * Uploads a file to Supabase storage.
+   */
+  uploadFile: async (file: File) => {
+    const supabase = getSupabase();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await client.api.upload.$post(
+      { form: formData },
+      {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      },
+    );
+
+    if (!res.ok) {
+      throw new Error('File upload failed');
+    }
+    const data = await res.json();
+    return data.url;
+  },
+
+  /**
+   * Refactored: Starts the server-side processing job.
+   * @returns {jobId: string}
+   */
+  processImage: async (
+    original_image_url: string, // This is the cleanCutoutDataUrl
+    processing_options: any,
+  ): Promise<{ jobId: string }> => {
+    const supabase = getSupabase();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) throw new Error('Not authenticated');
+
+    const res = await client.api['process-image'].$post(
+      {
+        json: { original_image_url, processing_options },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      },
+    );
+
+    if (res.status === 202) {
+      return res.json();
+    }
+
+    // Handle errors
+    const errorData = await res.json().catch(() => ({ error: 'Processing request failed' }));
+    throw new Error(errorData.error || 'Failed to start processing');
+  },
+
+  /**
+   * New: Polls for job status.
+   */
+  getJobStatus: async (
+    jobId: string,
+  ): Promise<{
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    final_image_url?: string;
+    error_message?: string;
+  }> => {
+    const supabase = getSupabase();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) throw new Error('Not authenticated');
+
+    const res = await client.api['job-status'][':id'].$get(
+      {
+        param: { id: jobId },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      },
+    );
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ error: 'Job not found' }));
+      throw new Error(errorData.error || 'Job not found');
+    }
+    return res.json();
+  },
 };

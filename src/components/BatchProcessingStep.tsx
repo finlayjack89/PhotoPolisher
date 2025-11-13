@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -11,7 +11,13 @@ import { Progress } from "@/components/ui/progress";
 import { Loader2, ArrowLeft, CheckCircle, AlertCircle, Wand2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api-client";
-import { SubjectPlacement, compositeLayers, getImageDimensions } from "@/lib/canvas-utils";
+import { 
+  SubjectPlacement, 
+  compositeLayers, 
+  getImageDimensions,
+  type CompositeOptions,
+  type ReflectionOptions
+} from "@/lib/canvas-utils";
 
 // Define the subject type
 interface Subject {
@@ -26,6 +32,9 @@ interface MasterRules {
   placement: SubjectPlacement;
   padding: number;
   aspectRatio: string;
+  // TODO: These should be passed in from ProductConfiguration
+  shadowOptions?: any; 
+  reflectionOptions?: ReflectionOptions;
 }
 
 interface BatchProcessingStepProps {
@@ -47,6 +56,17 @@ interface FailedImage {
   error: string;
 }
 
+type JobStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+interface Job {
+  name: string;
+  jobId: string;
+  cleanCutoutData: string; // Store this for final composite
+  status: JobStatus;
+  final_image_url?: string; // This will be the shadowed_subject_url
+  error_message?: string;
+}
+
 // Helper to read File as Data URL
 const fileToDataUrl = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -65,7 +85,7 @@ const calculateCanvasSize = (
   aspectRatio: string
 ) => {
   const paddingPercent = padding / 100;
-  
+
   // 1. Calculate padded subject size
   const paddedW = subjectW / (1 - paddingPercent * 2);
   const paddedH = subjectH / (1 - paddingPercent * 2);
@@ -85,7 +105,7 @@ const calculateCanvasSize = (
     canvasH = paddedH;
     canvasW = canvasH * finalAspectRatio;
   }
-  
+
   return { width: Math.round(canvasW), height: Math.round(canvasH) };
 };
 
@@ -97,87 +117,214 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
   onComplete,
   onBack,
 }) => {
+  const [jobs, setJobs] = useState<Job[]>([]);
   const [progress, setProgress] = useState(0);
   const [currentStep, setCurrentStep] = useState("Initializing...");
   const [completedImages, setCompletedImages] = useState<ProcessedImage[]>([]);
   const [failedImages, setFailedImages] = useState<FailedImage[]>([]);
   const { toast } = useToast();
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    processBatch();
+    startBatchProcessing();
+
+    return () => {
+      // Clear interval on component unmount
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
   }, []);
 
-  const processBatch = async () => {
-    const results: ProcessedImage[] = [];
-    const failed: FailedImage[] = [];
+  const startBatchProcessing = async () => {
+    setCurrentStep(`Starting ${subjects.length} processing jobs...`);
+    const newJobs: Job[] = [];
 
-    for (let i = 0; i < subjects.length; i++) {
-      const subject = subjects[i];
+    // TODO: These options should be passed in via masterRules
+    // from ProductConfiguration -> CommercialEditingWorkflow
+    const shadowOptions = { azimuth: 135, elevation: 45, spread: 10, opacity: 0.6 };
+    const reflectionOptions = { opacity: 0.4, falloff: 0.5 };
+
+    // Store all rules
+    masterRules.shadowOptions = shadowOptions;
+    masterRules.reflectionOptions = reflectionOptions;
+
+    for (const subject of subjects) {
       const name = (subject as File).name || (subject as Subject).name;
-      setCurrentStep(`Processing ${i + 1} of ${subjects.length}: ${name}`);
-      
       try {
         // --- Step 1: Get Cutout Data ---
-        let cleanCutoutData: string;
-        if (isPreCut) {
-          cleanCutoutData = await fileToDataUrl(subject as File);
-        } else {
-          // If we are post-BG-removal, the data is already here.
-          cleanCutoutData = (subject as Subject).backgroundRemovedData || '';
-        }
-        if (!cleanCutoutData) throw new Error("Missing cutout data");
-        
-        // --- Step 2: Get Shadow Data ---
-        const shadowResult = await api.addDropShadow({ 
-          images: [{ name: name, data: cleanCutoutData }] 
-        });
-        const subjectWithShadow = shadowResult.images[0].shadowedData;
-        if (!subjectWithShadow) throw new Error("Shadow generation failed");
+        const cleanCutoutData = isPreCut
+          ? await fileToDataUrl(subject as File)
+          : (subject as Subject).backgroundRemovedData || '';
 
+        if (!cleanCutoutData) throw new Error("Missing cutout data");
+
+        // --- Step 2: Start Async Job ---
+        const { jobId } = await api.processImage(cleanCutoutData, {
+          shadow: shadowOptions,
+        });
+
+        newJobs.push({
+          name,
+          jobId,
+          cleanCutoutData,
+          status: 'pending',
+        });
+
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        console.error(`Failed to start job for ${name}:`, error);
+        setFailedImages(prev => [...prev, { name, error: errorMessage }]);
+      }
+    }
+
+    setJobs(newJobs);
+
+    if (newJobs.length === 0) {
+      setCurrentStep("No jobs to process.");
+      return;
+    }
+
+    setCurrentStep("Jobs started. Polling for results...");
+
+    // Start polling
+    intervalRef.current = setInterval(() => {
+      pollJobsStatus(newJobs);
+    }, 3000); // Poll every 3 seconds
+  };
+
+  const pollJobsStatus = async (currentJobs: Job[]) => {
+    let completedCount = 0;
+    let failedCount = 0;
+    let needsUpdate = false;
+    const activeJobs = currentJobs.filter(j => j.status === 'pending' || j.status === 'processing');
+
+    if(activeJobs.length === 0) {
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        return;
+    }
+
+    for (const job of currentJobs) {
+      if (job.status === 'completed' || job.status === 'failed') {
+        if (job.status === 'completed') completedCount++;
+        if (job.status === 'failed') failedCount++;
+        continue;
+      }
+
+      // Job is still pending or processing, check its status
+      try {
+        const statusResult = await api.getJobStatus(job.jobId);
+        if (statusResult.status !== job.status) {
+          needsUpdate = true;
+          job.status = statusResult.status;
+
+          if (statusResult.status === 'completed') {
+            job.final_image_url = statusResult.final_image_url;
+            completedCount++;
+          } else if (statusResult.status === 'failed') {
+            job.error_message = statusResult.error_message;
+            setFailedImages(prev => [...prev.filter(f => f.name !== job.name), { name: job.name, error: job.error_message || 'Job failed' }]);
+            failedCount++;
+          }
+        }
+      } catch (error) {
+        console.error(`Error polling job ${job.jobId}:`, error);
+        job.status = 'failed';
+        job.error_message = (error as Error).message;
+        setFailedImages(prev => [...prev.filter(f => f.name !== job.name), { name: job.name, error: job.error_message }]);
+        failedCount++;
+        needsUpdate = true;
+      }
+    }
+
+    const totalProcessed = completedCount + failedCount;
+    setProgress((totalProcessed / jobs.length) * 100);
+    setCurrentStep(`Processing... ${totalProcessed} / ${jobs.length} complete.`);
+
+    if (needsUpdate) {
+      setJobs([...currentJobs]);
+    }
+
+    // Check if all jobs are done
+    if (totalProcessed === jobs.length) {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      setCurrentStep("All server processing complete. Compositing images...");
+      // Move to final client-side compositing
+      finishCompositing(currentJobs);
+    }
+  };
+
+  const finishCompositing = async (completedJobs: Job[]) => {
+    const finalResults: ProcessedImage[] = [];
+
+    for (const [index, job] of completedJobs.entries()) {
+      if (job.status !== 'completed' || !job.final_image_url) {
+        continue; // Skip failed jobs
+      }
+
+      setCurrentStep(`Compositing ${index + 1} / ${completedJobs.length}: ${job.name}`);
+
+      try {
         // --- Step 3: Calculate Crop ---
-        const { width, height } = await getImageDimensions(subjectWithShadow);
+        const { width, height } = await getImageDimensions(job.final_image_url);
         if (width === 0 || height === 0) throw new Error("Subject dimensions are zero");
-        
+
         const outputCanvasSize = calculateCanvasSize(
           width,
           height,
           masterRules.padding,
           masterRules.aspectRatio
         );
-        
-        // --- Step 4: Final Composite ---
-        const finalImage = await compositeLayers(
-          backdrop,
-          subjectWithShadow,
-          cleanCutoutData, // Pass clean cutout for reflection
-          masterRules.placement,
-          outputCanvasSize,
-          masterRules.padding // Pass padding for positioning
-        );
-        
-        results.push({ name, compositedData: finalImage });
-        setCompletedImages([...results]);
+
+        // --- Step 4: Final Composite (Client-side) ---
+        const compositeOptions: CompositeOptions = {
+          outputWidth: outputCanvasSize.width,
+          outputHeight: outputCanvasSize.height,
+          backdropUrl: backdrop,
+          subjectLayer: {
+            url: job.final_image_url, // Shadowed subject
+            x: 0, // compositeLayers will calculate x/y
+            y: 0,
+            width: width,
+            height: height
+          },
+          cleanSubjectUrl: job.cleanCutoutData, // Clean subject
+          placement: masterRules.placement,
+          paddingPercent: masterRules.padding,
+          reflectionOptions: masterRules.reflectionOptions
+        };
+
+        const finalImageBlob = await compositeLayers(compositeOptions);
+        if (!finalImageBlob) throw new Error("Canvas compositing failed");
+
+        const compositedDataUrl = await new Promise<string>((resolve, reject) => {
+           const reader = new FileReader();
+           reader.onloadend = () => resolve(reader.result as string);
+           reader.onerror = reject;
+           reader.readAsDataURL(finalImageBlob);
+        });
+
+        finalResults.push({ name: job.name, compositedData: compositedDataUrl });
+        setCompletedImages(prev => [...prev, { name: job.name, compositedData: compositedDataUrl }]);
 
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "Unknown error";
-        console.error(`Failed to process ${name}:`, error);
-        failed.push({ name, error: errorMessage });
-        setFailedImages([...failed]);
+        const errorMessage = error instanceof Error ? error.message : "Compositing error";
+        console.error(`Failed to composite ${job.name}:`, error);
+        setFailedImages(prev => [...prev.filter(f => f.name !== job.name), { name: job.name, error: errorMessage }]);
         toast({
-          title: `Failed: ${name}`,
+          title: `Failed: ${job.name}`,
           description: errorMessage,
           variant: "destructive",
         });
       }
-      
-      // Update progress
-      setProgress(((i + 1) / subjects.length) * 100);
     }
-    
+
     setCurrentStep("Batch processing complete!");
     // Wait 1 sec before transitioning to gallery
     setTimeout(() => {
-      onComplete(results);
+      onComplete(finalResults);
     }, 1000);
   };
 
@@ -207,12 +354,12 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
             <span className="font-medium">This may take several minutes. Please keep this tab open.</span>
           </div>
 
-          { (completedImages.length > 0 || failedImages.length > 0) &&
+          { (jobs.length > 0) &&
             <div className="grid grid-cols-2 gap-4 max-h-48 overflow-y-auto bg-muted/50 p-4 rounded-lg">
               <div className="space-y-2">
                 <h4 className="font-medium text-sm">Completed</h4>
                 <ul className="text-xs space-y-1 text-green-600">
-                  {completedImages.map((img) => (
+                  {jobs.filter(j => j.status === 'completed').map((img) => (
                     <li key={img.name} className="flex items-center gap-1.5 truncate" data-testid={`completed-${img.name}`}>
                       <CheckCircle className="h-3 w-3 shrink-0" />
                       <span>{img.name}</span>
@@ -223,7 +370,7 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
               <div className="space-y-2">
                 <h4 className="font-medium text-sm">Failed</h4>
                 <ul className="text-xs space-y-1 text-destructive">
-                  {failedImages.map((img) => (
+                  {jobs.filter(j => j.status === 'failed').map((img) => (
                     <li key={img.name} className="flex items-center gap-1.5 truncate" data-testid={`failed-${img.name}`}>
                       <AlertCircle className="h-3 w-3 shrink-0" />
                       <span>{img.name}</span>
@@ -233,7 +380,7 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
               </div>
             </div>
           }
-          
+
           <Button variant="outline" onClick={onBack} className="w-full" data-testid="button-cancel-batch">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Setup (This will cancel the batch)
