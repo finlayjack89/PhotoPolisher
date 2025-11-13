@@ -41,6 +41,13 @@ LuxSnap is a professional photo editing platform designed for e-commerce and pro
 - Effect: More realistic, professional-looking shadows with soft edges + sharp contact points
 - Performance: No additional API calls - both layers applied in single transformation
 
+**Critical Fix: Connection Timeout Handling** (add-drop-shadow.ts)
+- Added 30-second timeout per fetch attempt when retrieving transformed Cloudinary images
+- Implemented retry logic: 3 attempts with 2-second delays between retries
+- Fixes `ERR_CONNECTION_TIMED_OUT` errors that were preventing shadows from loading
+- Cloudinary transformations (especially dual-layer) can take time on first request
+- Effect: Shadows now load reliably even on slower connections or complex transformations
+
 **Phase 3: Dynamic Aspect Ratio Preview** (BackdropPositioning.tsx)
 - Fixed aspect ratio calculation in getPreviewStyles function
 - Now calculates dynamic aspect ratios from backdropDimensions (not subject dimensions)

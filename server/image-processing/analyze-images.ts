@@ -303,7 +303,9 @@ export async function analyzeBackdrop(req: AnalyzeBackdropRequest) {
     }
 
     const payload = await response.json() as any;
+    console.log('Full Gemini payload:', JSON.stringify(payload, null, 2));
     const rawText = payload?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    console.log('Extracted rawText:', rawText);
     const parsed = parseFloorResponse(rawText);
     const floorY = parsed ?? FLOOR_Y_DEFAULT;
     const clamped = Math.max(0, Math.min(1, floorY));

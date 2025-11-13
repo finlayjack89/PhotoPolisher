@@ -124,12 +124,41 @@ export async function addDropShadow(req: AddDropShadowRequest) {
       
       console.log(`Transformation URL (dual-layer shadow): ${transformedUrl}`);
 
-      const transformedResponse = await fetch(transformedUrl);
+      // Fetch transformed image with retry logic (Cloudinary transformations can take time on first request)
+      let transformedResponse;
+      let retries = 3;
+      let lastError;
       
-      if (!transformedResponse.ok) {
-        throw new Error(`Failed to fetch transformed image: ${transformedResponse.status}`);
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+          console.log(`Fetching transformed image (attempt ${attempt}/${retries})...`);
+          transformedResponse = await fetch(transformedUrl, {
+            signal: AbortSignal.timeout(30000) // 30 second timeout per attempt
+          });
+          
+          if (transformedResponse.ok) {
+            break; // Success!
+          } else if (attempt === retries) {
+            throw new Error(`Failed to fetch transformed image: ${transformedResponse.status}`);
+          }
+          
+          console.warn(`Attempt ${attempt} failed with status ${transformedResponse.status}, retrying...`);
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
+        } catch (error) {
+          lastError = error;
+          if (attempt === retries) {
+            throw new Error(`Failed to fetch transformed image after ${retries} attempts: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          }
+          console.warn(`Attempt ${attempt} failed:`, error instanceof Error ? error.message : 'Unknown error', '- retrying...');
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
       }
 
+      if (!transformedResponse || !transformedResponse.ok) {
+        throw new Error(`Failed to fetch transformed image after all retries`);
+      }
+
+      console.log(`✅ Fetched transformed image successfully`);
       const transformedBuffer = await transformedResponse.arrayBuffer();
       const base64 = Buffer.from(transformedBuffer).toString('base64');
       
