@@ -7,11 +7,41 @@ interface RemoveBackgroundRequest {
   }>;
 }
 
+// Timeout and retry configuration
+const REPLICATE_REQUEST_TIMEOUT = 30000; // 30 seconds for initial request
+const MAX_POLLING_TIME = 120000; // 2 minutes max polling time
+const INITIAL_POLL_DELAY = 1000; // Start with 1 second
+const MAX_POLL_DELAY = 5000; // Max 5 seconds between polls
+
+/**
+ * Fetch with timeout
+ */
+async function fetchWithTimeout(url: string, options: any, timeout: number): Promise<any> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error('Request timeout');
+    }
+    throw error;
+  }
+}
+
 export async function removeBackgrounds(req: RemoveBackgroundRequest) {
   const REPLICATE_API_KEY = process.env.REPLICATE_API_KEY;
   
   if (!REPLICATE_API_KEY) {
-    throw new Error('REPLICATE_API_KEY is not configured');
+    console.error('❌ REPLICATE_API_KEY is not configured');
+    throw new Error('REPLICATE_API_KEY is not configured. Please add your Replicate API key to continue.');
   }
 
   const { images } = req;
@@ -23,19 +53,23 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
     try {
       console.log(`Removing background from: ${image.name}`);
 
-      const response = await fetch('https://api.replicate.com/v1/predictions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${REPLICATE_API_KEY}`,
-          'Content-Type': 'application/json',
+      const response = await fetchWithTimeout(
+        'https://api.replicate.com/v1/predictions',
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${REPLICATE_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            version: 'fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003',
+            input: {
+              image: image.data,
+            }
+          }),
         },
-        body: JSON.stringify({
-          version: 'fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003',
-          input: {
-            image: image.data,
-          }
-        }),
-      });
+        REPLICATE_REQUEST_TIMEOUT
+      );
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -46,22 +80,92 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
       const prediction = await response.json() as any;
       console.log(`Prediction started for ${image.name}:`, prediction.id);
 
+      // Poll for completion with timeout and exponential backoff
       let result = prediction;
+      const startTime = Date.now();
+      let pollDelay = INITIAL_POLL_DELAY;
+      let pollCount = 0;
+
       while (result.status === 'starting' || result.status === 'processing') {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        const elapsedTime = Date.now() - startTime;
         
-        const statusResponse = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
-          headers: {
-            'Authorization': `Bearer ${REPLICATE_API_KEY}`,
+        if (elapsedTime > MAX_POLLING_TIME) {
+          throw new Error(`Timeout: Background removal took longer than ${MAX_POLLING_TIME / 1000} seconds`);
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, pollDelay));
+        pollCount++;
+        
+        const statusResponse = await fetchWithTimeout(
+          `https://api.replicate.com/v1/predictions/${prediction.id}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${REPLICATE_API_KEY}`,
+            },
           },
-        });
+          REPLICATE_REQUEST_TIMEOUT
+        );
         
         result = await statusResponse.json() as any;
-        console.log(`Status for ${image.name}:`, result.status);
+        console.log(`Status for ${image.name} (poll #${pollCount}, ${Math.round(elapsedTime / 1000)}s elapsed):`, result.status);
+        
+        // Exponential backoff with max delay
+        pollDelay = Math.min(pollDelay * 1.5, MAX_POLL_DELAY);
       }
 
       if (result.status === 'succeeded' && result.output) {
-        const outputUrl = result.output;
+        // Defensively extract URL from Replicate output
+        // Replicate can return: string URL, array of URLs, or nested objects
+        let outputUrl: string | null = null;
+        
+        if (typeof result.output === 'string') {
+          outputUrl = result.output;
+        } else if (Array.isArray(result.output)) {
+          if (result.output.length === 0) {
+            throw new Error('Replicate returned empty output array');
+          }
+          // Find first string URL or extract URL from object entries
+          for (const item of result.output) {
+            if (typeof item === 'string') {
+              outputUrl = item;
+              break;
+            } else if (item?.url) {
+              outputUrl = item.url;
+              break;
+            } else if (item?.href) {
+              outputUrl = item.href;
+              break;
+            } else if (item?.path) {
+              outputUrl = item.path;
+              break;
+            }
+          }
+        } else if (result.output?.files && Array.isArray(result.output.files)) {
+          // Find first string URL or extract URL from object entries
+          for (const item of result.output.files) {
+            if (typeof item === 'string') {
+              outputUrl = item;
+              break;
+            } else if (item?.url) {
+              outputUrl = item.url;
+              break;
+            } else if (item?.href) {
+              outputUrl = item.href;
+              break;
+            } else if (item?.path) {
+              outputUrl = item.path;
+              break;
+            }
+          }
+        } else if (result.output?.url) {
+          outputUrl = result.output.url;
+        }
+        
+        if (!outputUrl || typeof outputUrl !== 'string') {
+          console.error('Unexpected Replicate output structure:', JSON.stringify(result.output));
+          throw new Error('Could not extract valid URL from Replicate output');
+        }
+        
         const imageResponse = await fetch(outputUrl);
         const imageBuffer = await imageResponse.arrayBuffer();
         const base64 = Buffer.from(imageBuffer).toString('base64');

@@ -221,3 +221,14 @@ export async function uploadBackdrop(formData: FormData): Promise<any> {
     body: JSON.stringify(backdropData),
   });
 }
+
+/**
+ * Fetch all backdrops for a specific user
+ * @param userId The user ID to fetch backdrops for
+ * @returns Array of backdrop objects
+ */
+export async function getBackdrops(userId: string): Promise<any[]> {
+  return apiRequest(`/api/backdrops/${userId}`, {
+    method: 'GET',
+  });
+}
