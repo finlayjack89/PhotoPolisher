@@ -54,3 +54,47 @@ Preferred communication style: Simple, everyday language.
 ### Development Tools
 - **ESLint**: Code linting.
 - **PostCSS**: CSS processing with Tailwind and Autoprefixer.
+
+## Recent Changes
+
+### November 13, 2025 - Background Removal Fix
+
+**Problem**: Background removal was failing with "api.removeBackground is not a function" error. The frontend expected a single-file helper function, but only the plural `removeBackgrounds` existed.
+
+**Root Causes**:
+1. API client missing `removeBackground(file: File)` function
+2. Backend omitted `size` field in responses, breaking compression logic
+3. Frontend didn't check for `error` flag in responses, treating failures as successes
+
+**Solution** (4-part fix):
+1. **API Client** (`src/lib/api-client.ts`):
+   - Added `removeBackground(file: File)` function
+   - Converts File → base64 data URL via FileReader
+   - Calls existing `/api/remove-backgrounds` endpoint with proper format
+   - Typed response includes non-optional `size` and optional `error`
+
+2. **Backend Success Path** (`server/image-processing/remove-backgrounds.ts`):
+   - Added `size: imageBuffer.byteLength` to successful responses
+   - Logs accurate byte size in success messages
+
+3. **Backend Error Path** (`server/image-processing/remove-backgrounds.ts`):
+   - Calculates size from original base64 data for error responses
+   - Formula: `base64String.length * 3 / 4` (after stripping data URL prefix)
+   - Returns `size` + `error` to honor type contract even in failure case
+
+4. **Frontend Retry Logic** (`src/components/BackgroundRemovalStep.tsx`):
+   - Checks for `processedImage.error` flag before treating as success
+   - Throws error if flag present, triggering exponential backoff retry
+   - Failed images properly enter manual retry queue after 3 attempts
+
+**Architecture Decision**: Client-side File→base64 conversion (architect-recommended)
+- Avoids backend multipart refactor
+- Aligns with existing JSON-based processing endpoints
+- Browser conversion cost acceptable for 20MB limit
+
+**Contract Compliance**:
+- Backend always returns `size` (success OR error paths)
+- Frontend checks error flag before processing
+- Size used for compression warnings and UI display
+
+**Effect**: Background removal now works end-to-end with proper retry logic, accurate file sizes, and correct error handling.
