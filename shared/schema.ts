@@ -87,6 +87,20 @@ export const insertBatchImageSchema = createInsertSchema(batchImages).omit({ id:
 export type InsertBatchImage = z.infer<typeof insertBatchImageSchema>;
 export type BatchImage = typeof batchImages.$inferSelect;
 
+// Files Table (unified file storage with opaque IDs)
+export const files = pgTable('files', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  storageKey: text('storage_key').notNull().unique(),
+  mimeType: text('mime_type').notNull(),
+  bytes: integer('bytes').notNull(),
+  originalFilename: text('original_filename'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const insertFileSchema = createInsertSchema(files).omit({ id: true, createdAt: true });
+export type InsertFile = z.infer<typeof insertFileSchema>;
+export type File = typeof files.$inferSelect;
+
 // Image Jobs Table (for async processing queue)
 export const imageJobs = pgTable('image_jobs', {
   id: uuid('id').defaultRandom().primaryKey(),
