@@ -5,7 +5,6 @@ import { z } from "zod";
 // Enums
 export const processingStatusEnum = pgEnum('processing_status', ['pending', 'processing', 'completed', 'failed', 'cancelled']);
 export const operationTypeEnum = pgEnum('operation_type', ['upscale', 'compress', 'thumbnail', 'format_convert', 'batch', 'composite']);
-export const imageJobStatusEnum = pgEnum('image_job_status', ['pending', 'processing', 'completed', 'failed']);
 
 // User Quotas Table
 export const userQuotas = pgTable('user_quotas', {
@@ -85,36 +84,3 @@ export const batchImages = pgTable('batch_images', {
 export const insertBatchImageSchema = createInsertSchema(batchImages).omit({ id: true, createdAt: true });
 export type InsertBatchImage = z.infer<typeof insertBatchImageSchema>;
 export type BatchImage = typeof batchImages.$inferSelect;
-
-// Image Jobs Table (for async background processing)
-export const imageJobs = pgTable('image_jobs', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  userId: text('user_id').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-  status: imageJobStatusEnum('status').default('pending').notNull(),
-  
-  // Job type and progress tracking
-  jobType: text('job_type').default('shadow_reflection').notNull(),
-  progress: integer('progress').default(0).notNull(), // 0-100 percentage
-  
-  // Input data from the client
-  originalImageUrl: text('original_image_url'),
-  processingOptions: jsonb('processing_options').default({}).notNull(),
-  
-  // Output data from the server
-  finalImageUrl: text('final_image_url'),
-  errorMessage: text('error_message'),
-  
-  // TTL for cleanup (1 hour default)
-  expiresAt: timestamp('expires_at', { withTimezone: true }),
-}, (table) => ({
-  userIdStatusIdx: { 
-    name: 'idx_image_jobs_user_id_status',
-    columns: [table.userId, table.status] 
-  }
-}));
-
-export const insertImageJobSchema = createInsertSchema(imageJobs).omit({ id: true, createdAt: true, updatedAt: true });
-export type InsertImageJob = z.infer<typeof insertImageJobSchema>;
-export type ImageJob = typeof imageJobs.$inferSelect;

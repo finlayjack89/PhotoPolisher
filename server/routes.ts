@@ -1,7 +1,7 @@
 import express, { type Request, type Response } from "express";
 import multer from "multer";
 import type { IStorage } from "./storage";
-import { insertUserQuotaSchema, insertProcessingCacheSchema, insertBackdropLibrarySchema, insertBatchImageSchema, insertImageJobSchema } from "@shared/schema";
+import { insertUserQuotaSchema, insertProcessingCacheSchema, insertBackdropLibrarySchema, insertBatchImageSchema } from "@shared/schema";
 
 const upload = multer({ 
   storage: multer.memoryStorage(),
@@ -147,60 +147,6 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
       res.json(image);
     } catch (error) {
       res.status(400).json({ error: "Invalid batch image data" });
-    }
-  });
-
-  // Image Jobs (Background Processing Queue)
-  app.post("/api/jobs", async (req: Request, res: Response) => {
-    try {
-      const validated = insertImageJobSchema.parse(req.body);
-      const job = await storage.createImageJob(validated);
-      res.json(job);
-    } catch (error) {
-      console.error("Error creating image job:", error);
-      res.status(400).json({ error: error instanceof Error ? error.message : "Invalid job data" });
-    }
-  });
-
-  app.get("/api/jobs/:id", async (req: Request, res: Response) => {
-    try {
-      const job = await storage.getImageJob(req.params.id);
-      if (!job) {
-        return res.status(404).json({ error: "Job not found" });
-      }
-      res.json(job);
-    } catch (error) {
-      console.error("Error fetching job:", error);
-      res.status(500).json({ error: "Failed to fetch job" });
-    }
-  });
-
-  app.get("/api/jobs", async (req: Request, res: Response) => {
-    try {
-      const { userId, status } = req.query;
-      if (!userId) {
-        return res.status(400).json({ error: "userId query parameter required" });
-      }
-      const jobs = await storage.getUserImageJobs(userId as string, status as string | undefined);
-      res.json(jobs);
-    } catch (error) {
-      console.error("Error fetching user jobs:", error);
-      res.status(500).json({ error: "Failed to fetch jobs" });
-    }
-  });
-
-  app.post("/api/jobs/:id/cancel", async (req: Request, res: Response) => {
-    try {
-      const job = await storage.updateJobStatus(req.params.id, 'failed', {
-        errorMessage: 'Cancelled by user'
-      });
-      if (!job) {
-        return res.status(404).json({ error: "Job not found" });
-      }
-      res.json(job);
-    } catch (error) {
-      console.error("Error cancelling job:", error);
-      res.status(500).json({ error: "Failed to cancel job" });
     }
   });
 
