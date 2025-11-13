@@ -174,3 +174,58 @@ Preferred communication style: Simple, everyday language.
 - Run AI floor analysis without timeouts
 - Process background removal without stuck jobs
 - Handle all documented API response formats
+
+### November 13, 2025 - File ID Migration (M1-M3 Complete)
+
+**Problem**: Recurring 404 errors due to inconsistent file path handling. Legacy system stored physical paths (e.g., `/uploads/1699999999999-image.png`) in database, causing:
+1. URL encoding issues with special characters in filenames
+2. Direct coupling to filesystem structure
+3. Difficulty migrating to cloud storage (S3, Cloudinary)
+4. Path sanitization vulnerabilities
+
+**Solution**: Opaque file ID system with 3-milestone migration strategy
+
+**MILESTONE 1: File Service (Completed)**
+Built new centralized file service:
+- Created `files` table with UUID-based opaque IDs
+- `POST /api/files` - Upload and store files, return fileId
+- `GET /api/files/:fileId` - Retrieve files by ID
+- Backend tracks storage location internally, frontend only uses IDs
+
+**MILESTONE 2: Backend Migration (Completed)**
+Dual-write strategy for zero-downtime migration:
+- Added nullable `fileId` columns to `backdrop_library` and `batch_images` (manual SQL migration due to Drizzle Kit TTY blocker)
+- Updated `/api/upload` to create file in new service AND legacy storage, returns both `{fileId, url}` for gradual migration
+- Updated `/uploads/:filename` with new service fallback for backwards compatibility
+
+**MILESTONE 3: Frontend Migration (Completed)**
+Switched all frontend components to use file IDs:
+1. **uploadBackdrop** (`src/lib/api-client.ts`):
+   - Switched to `/api/upload` (dual-write endpoint)
+   - Sends both `fileId` (new) and `storagePath` (legacy) to `/api/backdrops`
+   - Tolerates backend omitting `url` field (future-proof)
+
+2. **BackdropLibrary** (`src/components/BackdropLibrary.tsx`):
+   - Uses direct API URL: `/api/files/${fileId}` for new uploads
+   - Falls back to `/api/get-memstorage-file?path=...` for legacy data
+   - No blob URL creation = no memory leaks, no React lifecycle complexity
+
+3. **Library Batch Images** (`src/pages/Library.tsx`):
+   - Same dual-path strategy as BackdropLibrary
+   - Simplified image loading with direct endpoints
+
+**Architecture Decisions**:
+1. **Opaque IDs**: UUIDs hide implementation details, enable seamless cloud migration
+2. **Direct API URLs**: Eliminated blob URL lifecycle management (React Strict Mode safe)
+3. **Dual-Write**: Backend supports both old and new paths during transition
+4. **Progressive Migration**: Components prefer fileId, gracefully fall back to legacy
+
+**Manual Migration Exception**:
+Used manual SQL migration (`ALTER TABLE ... ADD COLUMN fileId`) instead of Drizzle Kit due to TTY limitation in Replit environment. Documented for future reference.
+
+**Status**: 
+- ✅ Milestones 1-3 complete and architect-approved
+- ⏳ Cleanup/retirement pending (M3-5 to M3-8)
+- ⏳ Final E2E testing with real images pending
+
+**Effect**: File handling now uses production-ready opaque ID system. Frontend and backend fully migrated with backwards compatibility intact. Ready for cloud storage integration and legacy code retirement.
