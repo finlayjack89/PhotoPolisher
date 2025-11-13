@@ -37,18 +37,29 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
       }
 
       try {
-        // Generate unique storage path
         const timestamp = Date.now();
         const sanitizedFilename = req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-        const storagePath = `uploads/${timestamp}-${sanitizedFilename}`;
+        const storageKey = `uploads/${timestamp}-${sanitizedFilename}`;
 
-        // Save file to memory storage
-        await storage.saveFileToMemStorage(storagePath, req.file.buffer, req.file.mimetype);
+        // NEW: Create file via new file service (dual-write)
+        const file = await storage.createFile({
+          storageKey,
+          mimeType: req.file.mimetype,
+          bytes: req.file.buffer.length,
+          originalFilename: req.file.originalname,
+        }, req.file.buffer);
 
-        // Return URL that can be used to retrieve the file
-        const url = `/uploads/${timestamp}-${sanitizedFilename}`;
-        
-        res.json({ url });
+        // ALSO save to legacy storage for backwards compatibility during migration
+        await storage.saveFileToMemStorage(storageKey, req.file.buffer, req.file.mimetype);
+
+        // Return BOTH legacy and new formats for gradual migration
+        res.json({ 
+          url: `/uploads/${timestamp}-${sanitizedFilename}`,  // LEGACY (deprecated)
+          fileId: file.id,                                     // NEW
+          publicUrl: `/api/files/${file.id}`,                 // NEW
+          bytes: file.bytes,                                   // NEW
+          mimeType: file.mimeType,                            // NEW
+        });
       } catch (error) {
         console.error("File upload error:", error);
         res.status(500).json({ error: "Failed to upload file" });
@@ -58,15 +69,28 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
 
   app.get("/uploads/:filename", async (req: Request, res: Response) => {
     try {
-      const storagePath = `uploads/${req.params.filename}`;
-      const file = await storage.getFileFromMemStorage(storagePath);
+      const storageKey = `uploads/${req.params.filename}`;
+      
+      // Try new file service first
+      let fileData = await storage.getFileByStorageKey(storageKey);
+      
+      // Fallback to legacy storage if not found
+      if (!fileData) {
+        const legacyFile = await storage.getFileFromMemStorage(storageKey);
+        if (legacyFile) {
+          res.setHeader("Content-Type", legacyFile.mimeType);
+          res.send(legacyFile.buffer);
+          return;
+        }
+      }
 
-      if (!file) {
+      if (!fileData) {
         return res.status(404).json({ error: "File not found" });
       }
 
-      res.setHeader("Content-Type", file.mimeType);
-      res.send(file.buffer);
+      res.setHeader("Content-Type", fileData.file.mimeType);
+      res.setHeader("Content-Length", fileData.file.bytes.toString());
+      res.send(fileData.buffer);
     } catch (error) {
       console.error("File retrieval error:", error);
       res.status(500).json({ error: "Failed to retrieve file" });
