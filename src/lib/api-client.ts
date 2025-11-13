@@ -156,7 +156,7 @@ export async function uploadBackdrop(formData: FormData): Promise<any> {
   
   fileFormData.append('file', fileToUpload);
   
-  const uploadResponse = await fetch('/api/upload', {
+  const uploadResponse = await fetch('/api/files', {
     method: 'POST',
     body: fileFormData,
   });
@@ -179,14 +179,13 @@ export async function uploadBackdrop(formData: FormData): Promise<any> {
   try {
     uploadResult = JSON.parse(responseText);
   } catch {
-    throw new Error('Invalid response from upload endpoint');
+    throw new Error('Invalid response from file service');
   }
   
   const fileId = uploadResult.fileId;
-  const legacyPath = uploadResult.url;
   
   if (!fileId) {
-    throw new Error('Upload response missing file ID');
+    throw new Error('File service response missing file ID');
   }
   
   // Step 2: Create backdrop entry in database with validation
@@ -209,18 +208,13 @@ export async function uploadBackdrop(formData: FormData): Promise<any> {
     throw new Error('Invalid height value');
   }
   
-  const backdropData: any = {
+  const backdropData = {
     name: name as string,
     userId: userId as string,
-    fileId: fileId,               // NEW: Primary file identifier
+    fileId: fileId,               // File ID from new file service
     width: width || 1920,
     height: height || 1080,
   };
-  
-  // MIGRATION: Include legacy path if available (backend may still require it)
-  if (legacyPath) {
-    backdropData.storagePath = legacyPath;
-  }
   
   return apiRequest('/api/backdrops', {
     method: 'POST',

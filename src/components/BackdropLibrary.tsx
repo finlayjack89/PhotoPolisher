@@ -63,19 +63,12 @@ export const BackdropLibrary = ({
     
     for (const backdrop of backdrops) {
       if (!imageUrls[backdrop.id]) {
-        let url: string;
-        
-        if (backdrop.fileId) {
-          // NEW: Use file ID endpoint directly
-          url = `/api/files/${backdrop.fileId}`;
-        } else if (backdrop.storagePath) {
-          // LEGACY: Use memory storage endpoint directly (no blob URL needed!)
-          url = `/api/get-memstorage-file?path=${encodeURIComponent(backdrop.storagePath)}`;
-        } else {
+        if (!backdrop.fileId) {
+          console.error(`Backdrop ${backdrop.id} missing fileId - skipping`);
           continue;
         }
         
-        urls[backdrop.id] = url;
+        urls[backdrop.id] = `/api/files/${backdrop.fileId}`;
       }
     }
     

@@ -54,19 +54,12 @@ const Library = () => {
     
     for (const image of selectedBatch.images) {
       if (!imageUrls[image.id]) {
-        let url: string;
-        
-        if (image.fileId) {
-          // NEW: Use file ID endpoint directly
-          url = `/api/files/${image.fileId}`;
-        } else if (image.storage_path) {
-          // LEGACY: Use memory storage endpoint directly (no blob URL needed!)
-          url = `/api/get-memstorage-file?path=${encodeURIComponent(image.storage_path)}`;
-        } else {
+        if (!image.fileId) {
+          console.error(`Batch image ${image.id} missing fileId - skipping`);
           continue;
         }
         
-        urls[image.id] = url;
+        urls[image.id] = `/api/files/${image.fileId}`;
       }
     }
     
