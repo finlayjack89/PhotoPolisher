@@ -9,6 +9,8 @@ import type {
   InsertBackdropLibrary,
   BatchImage,
   InsertBatchImage,
+  ImageJob,
+  InsertImageJob,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -33,6 +35,14 @@ export interface IStorage {
   getBatchImages(batchId: string): Promise<BatchImage[]>;
   createBatchImage(image: InsertBatchImage): Promise<BatchImage>;
   
+  // Image Jobs
+  createImageJob(job: InsertImageJob): Promise<ImageJob>;
+  getImageJob(jobId: string): Promise<ImageJob | null>;
+  getUserImageJobs(userId: string, status?: string): Promise<ImageJob[]>;
+  claimNextPendingJob(userId?: string): Promise<ImageJob | null>;
+  updateJobStatus(jobId: string, status: string, payload: { finalImageUrl?: string; errorMessage?: string; progress?: number }): Promise<ImageJob | null>;
+  cleanupExpiredJobs(): Promise<number>;
+  
   // File Storage
   saveFileToMemStorage(storagePath: string, buffer: Buffer, mimeType: string): Promise<void>;
   getFileFromMemStorage(storagePath: string): Promise<{ buffer: Buffer; mimeType: string } | null>;
@@ -44,6 +54,7 @@ export class MemStorage implements IStorage {
   private systemHealth: SystemHealth[] = [];
   private backdropLibrary: Map<string, BackdropLibrary> = new Map();
   private batchImages: Map<string, BatchImage> = new Map();
+  private imageJobs: Map<string, ImageJob> = new Map();
   private fileStorage: Map<string, { buffer: Buffer; mimeType: string }> = new Map();
 
   async getUserQuota(userId: string): Promise<UserQuota | null> {
@@ -206,6 +217,112 @@ export class MemStorage implements IStorage {
 
   async getFileFromMemStorage(storagePath: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
     return this.fileStorage.get(storagePath) || null;
+  }
+
+  async createImageJob(job: InsertImageJob): Promise<ImageJob> {
+    const id = crypto.randomUUID();
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour from now
+    
+    const newJob: ImageJob = {
+      id,
+      userId: job.userId,
+      createdAt: now,
+      updatedAt: now,
+      status: job.status ?? 'pending',
+      jobType: job.jobType ?? 'shadow_reflection',
+      progress: job.progress ?? 0,
+      originalImageUrl: job.originalImageUrl ?? null,
+      processingOptions: job.processingOptions ?? {},
+      finalImageUrl: job.finalImageUrl ?? null,
+      errorMessage: job.errorMessage ?? null,
+      expiresAt: job.expiresAt ?? expiresAt,
+    };
+    
+    this.imageJobs.set(id, newJob);
+    
+    // Cleanup old jobs when creating new ones
+    await this.cleanupExpiredJobs();
+    
+    return newJob;
+  }
+
+  async getImageJob(jobId: string): Promise<ImageJob | null> {
+    return this.imageJobs.get(jobId) || null;
+  }
+
+  async getUserImageJobs(userId: string, status?: string): Promise<ImageJob[]> {
+    const jobs: ImageJob[] = [];
+    for (const [_, job] of this.imageJobs) {
+      if (job.userId === userId && (!status || job.status === status)) {
+        jobs.push(job);
+      }
+    }
+    return jobs.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  async claimNextPendingJob(userId?: string): Promise<ImageJob | null> {
+    // Find the oldest pending job
+    let oldestJob: ImageJob | null = null;
+    let oldestTime = Date.now();
+    
+    for (const [_, job] of this.imageJobs) {
+      if (job.status === 'pending' && (!userId || job.userId === userId)) {
+        const jobTime = job.createdAt.getTime();
+        if (jobTime < oldestTime) {
+          oldestTime = jobTime;
+          oldestJob = job;
+        }
+      }
+    }
+    
+    if (oldestJob) {
+      // Atomically claim the job by setting status to processing
+      const updatedJob: ImageJob = {
+        ...oldestJob,
+        status: 'processing',
+        updatedAt: new Date(),
+      };
+      this.imageJobs.set(oldestJob.id, updatedJob);
+      return updatedJob;
+    }
+    
+    return null;
+  }
+
+  async updateJobStatus(
+    jobId: string, 
+    status: string, 
+    payload: { finalImageUrl?: string; errorMessage?: string; progress?: number }
+  ): Promise<ImageJob | null> {
+    const job = this.imageJobs.get(jobId);
+    if (!job) return null;
+    
+    const updatedJob: ImageJob = {
+      ...job,
+      status: status as any,
+      updatedAt: new Date(),
+      finalImageUrl: payload.finalImageUrl ?? job.finalImageUrl,
+      errorMessage: payload.errorMessage ?? job.errorMessage,
+      progress: payload.progress ?? job.progress,
+    };
+    
+    this.imageJobs.set(jobId, updatedJob);
+    return updatedJob;
+  }
+
+  async cleanupExpiredJobs(): Promise<number> {
+    const now = new Date();
+    let deletedCount = 0;
+    
+    for (const [id, job] of this.imageJobs) {
+      if (job.expiresAt && job.expiresAt < now) {
+        this.imageJobs.delete(id);
+        deletedCount++;
+      }
+    }
+    
+    return deletedCount;
   }
 
   private generateCacheKey(originalUrl: string, operation: string, optionsHash: string): string {
