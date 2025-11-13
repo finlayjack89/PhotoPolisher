@@ -40,10 +40,6 @@ export interface IStorage {
   getFile(fileId: string): Promise<{ file: File; buffer: Buffer } | null>;
   getFileByStorageKey(storageKey: string): Promise<{ file: File; buffer: Buffer } | null>;
   deleteFile(fileId: string): Promise<boolean>;
-  
-  // Legacy File Storage (deprecated - will be removed in Phase 5)
-  saveFileToMemStorage(storagePath: string, buffer: Buffer, mimeType: string): Promise<void>;
-  getFileFromMemStorage(storagePath: string): Promise<{ buffer: Buffer; mimeType: string } | null>;
 }
 
 export class MemStorage implements IStorage {
@@ -53,7 +49,6 @@ export class MemStorage implements IStorage {
   private backdropLibrary: Map<string, BackdropLibrary> = new Map();
   private batchImages: Map<string, BatchImage> = new Map();
   private files: Map<string, { file: File; buffer: Buffer }> = new Map();
-  private fileStorage: Map<string, { buffer: Buffer; mimeType: string }> = new Map();
 
   async getUserQuota(userId: string): Promise<UserQuota | null> {
     for (const [_, quota] of this.userQuotas) {
@@ -209,14 +204,6 @@ export class MemStorage implements IStorage {
     };
     this.batchImages.set(id, newImage);
     return newImage;
-  }
-
-  async saveFileToMemStorage(storagePath: string, buffer: Buffer, mimeType: string): Promise<void> {
-    this.fileStorage.set(storagePath, { buffer, mimeType });
-  }
-
-  async getFileFromMemStorage(storagePath: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
-    return this.fileStorage.get(storagePath) || null;
   }
 
   async createFile(fileData: InsertFile, buffer: Buffer): Promise<File> {
