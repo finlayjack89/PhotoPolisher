@@ -9,6 +9,8 @@ import type {
   InsertBackdropLibrary,
   BatchImage,
   InsertBatchImage,
+  File,
+  InsertFile,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -33,7 +35,13 @@ export interface IStorage {
   getBatchImages(batchId: string): Promise<BatchImage[]>;
   createBatchImage(image: InsertBatchImage): Promise<BatchImage>;
   
-  // File Storage
+  // File Management (opaque ID-based)
+  createFile(file: InsertFile, buffer: Buffer): Promise<File>;
+  getFile(fileId: string): Promise<{ file: File; buffer: Buffer } | null>;
+  getFileByStorageKey(storageKey: string): Promise<{ file: File; buffer: Buffer } | null>;
+  deleteFile(fileId: string): Promise<boolean>;
+  
+  // Legacy File Storage (deprecated - will be removed in Phase 5)
   saveFileToMemStorage(storagePath: string, buffer: Buffer, mimeType: string): Promise<void>;
   getFileFromMemStorage(storagePath: string): Promise<{ buffer: Buffer; mimeType: string } | null>;
 }
