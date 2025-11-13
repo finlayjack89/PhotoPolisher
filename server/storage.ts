@@ -52,6 +52,7 @@ export class MemStorage implements IStorage {
   private systemHealth: SystemHealth[] = [];
   private backdropLibrary: Map<string, BackdropLibrary> = new Map();
   private batchImages: Map<string, BatchImage> = new Map();
+  private files: Map<string, { file: File; buffer: Buffer }> = new Map();
   private fileStorage: Map<string, { buffer: Buffer; mimeType: string }> = new Map();
 
   async getUserQuota(userId: string): Promise<UserQuota | null> {
@@ -214,6 +215,48 @@ export class MemStorage implements IStorage {
 
   async getFileFromMemStorage(storagePath: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
     return this.fileStorage.get(storagePath) || null;
+  }
+
+  async createFile(fileData: InsertFile, buffer: Buffer): Promise<File> {
+    const id = crypto.randomUUID();
+    const now = new Date();
+    
+    const normalizedStorageKey = fileData.storageKey.startsWith('/') 
+      ? fileData.storageKey.substring(1) 
+      : fileData.storageKey;
+    
+    const newFile: File = {
+      id,
+      storageKey: normalizedStorageKey,
+      mimeType: fileData.mimeType,
+      bytes: fileData.bytes,
+      originalFilename: fileData.originalFilename || null,
+      createdAt: now,
+    };
+    
+    this.files.set(id, { file: newFile, buffer });
+    return newFile;
+  }
+
+  async getFile(fileId: string): Promise<{ file: File; buffer: Buffer } | null> {
+    return this.files.get(fileId) || null;
+  }
+
+  async getFileByStorageKey(storageKey: string): Promise<{ file: File; buffer: Buffer } | null> {
+    const normalizedKey = storageKey.startsWith('/') 
+      ? storageKey.substring(1) 
+      : storageKey;
+    
+    for (const [_, fileData] of this.files) {
+      if (fileData.file.storageKey === normalizedKey) {
+        return fileData;
+      }
+    }
+    return null;
+  }
+
+  async deleteFile(fileId: string): Promise<boolean> {
+    return this.files.delete(fileId);
   }
 
   private generateCacheKey(originalUrl: string, operation: string, optionsHash: string): string {
