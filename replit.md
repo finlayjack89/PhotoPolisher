@@ -6,6 +6,30 @@ LuxSnap is a professional photo editing platform designed for e-commerce and pro
 
 ## Recent Changes
 
+### November 13, 2025 - File Upload Endpoint Restored
+
+**Critical Fix: Backdrop Upload Functionality**
+Restored the missing `/api/upload` endpoint that handles backdrop image uploads:
+
+- **Multer Configuration**: Added multer with in-memory storage and security limits
+  - 20MB maximum file size to prevent DoS attacks
+  - Single file per upload restriction
+  - Proper error handling for LIMIT_FILE_SIZE errors
+- **Upload Endpoint** (`POST /api/upload`):
+  - Accepts multipart/form-data with `file` field
+  - Validates file presence and size
+  - Sanitizes filenames to prevent path traversal attacks
+  - Saves files to memory storage via `storage.saveFileToMemStorage()`
+  - Returns JSON with URL: `{"url": "/uploads/{timestamp}-{filename}"}`
+- **File Serving** (`GET /uploads/:filename`):
+  - Retrieves files from memory storage
+  - Sets correct Content-Type headers
+  - Returns 404 for missing files
+
+**Security**: Implementation reviewed and approved by architect - prevents DoS via unbounded uploads while maintaining functionality.
+
+**Effect**: "Upload Backdrop" feature now works correctly, allowing users to upload custom backdrop images for product compositing.
+
 ### November 13, 2025 - Async Job Queue Implementation (Express + Drizzle)
 
 **6-Part Stack Migration Fix**
