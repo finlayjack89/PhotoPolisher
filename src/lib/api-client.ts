@@ -290,6 +290,11 @@ export async function getBackdrops(userId: string): Promise<any[]> {
  * Remove background from images using file IDs
  * @param fileIds Array of file IDs to process
  * @returns Object containing processed subjects
+ * 
+ * TIMEOUT STRATEGY:
+ * - Each image takes ~5 seconds
+ * - Using 5-minute timeout to handle large batches (up to 60 images)
+ * - TODO: Replace with async job queue for better UX (see architect recommendation)
  */
 export async function removeBackgroundWithFileIds(fileIds: string[]): Promise<{
   subjects: Array<{
@@ -299,9 +304,13 @@ export async function removeBackgroundWithFileIds(fileIds: string[]): Promise<{
     error?: string;
   }>;
 }> {
+  // 5-minute timeout for background removal (sequential processing takes time)
+  const timeout = 300000; // 300 seconds = 5 minutes
+  
   return apiRequest('/api/remove-background', {
     method: 'POST',
     body: JSON.stringify({ fileIds }),
+    timeout,
   });
 }
 
