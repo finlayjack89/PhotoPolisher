@@ -92,7 +92,7 @@ export async function processBackgroundRemoval(
         return {
           originalFileId: fileId,
           processedFileId: processedFile.id,
-          processedUrl: processedImage.transparentData,
+          processedUrl: `/api/files/${processedFile.id}`,
         };
       } catch (error) {
         console.error(`[Background Job ${jobId}] Error processing file ${fileId}:`, error);
