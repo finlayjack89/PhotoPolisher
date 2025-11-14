@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode, useRef, useMemo } from 'react';
 
 interface WorkflowState {
   step: 'upload' | 'remove-bg' | 'position' | 'finalize';
@@ -20,6 +20,8 @@ interface WorkflowState {
 
 interface WorkflowContextType {
   state: WorkflowState;
+  files: File[];
+  hasMissingFiles: boolean;
   setStep: (step: WorkflowState['step']) => void;
   setUploadedFileIds: (fileIds: string[]) => void;
   setProcessedSubjects: (subjects: WorkflowState['processedSubjects']) => void;
@@ -140,8 +142,20 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     return Array.from(uploadedFilesRef.current.values());
   };
 
+  // Memoize files and hasMissingFiles for stable references
+  // This prevents infinite render loops in consuming components
+  const files = useMemo(() => {
+    return Array.from(uploadedFilesRef.current.values());
+  }, [state.uploadedFileIds]);
+
+  const hasMissingFiles = useMemo(() => {
+    return state.uploadedFileIds.length > 0 && files.length === 0;
+  }, [state.uploadedFileIds.length, files.length]);
+
   const contextValue: WorkflowContextType = {
     state,
+    files,
+    hasMissingFiles,
     setStep,
     setUploadedFileIds,
     setProcessedSubjects,

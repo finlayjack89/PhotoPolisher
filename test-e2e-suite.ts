@@ -8,9 +8,10 @@ import fs from 'fs';
 import path from 'path';
 import FormData from 'form-data';
 import fetch from 'node-fetch';
+import { DEMO_USER_ID } from './shared/constants';
 
 const BASE_URL = 'http://localhost:5000';
-const USER_ID = 'demo-user-id';
+const USER_ID = DEMO_USER_ID;
 
 interface TestResult {
   testId: string;

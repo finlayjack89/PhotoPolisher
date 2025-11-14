@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react';
+import { DEMO_USER_ID } from '@/lib/constants';
 
 interface User {
   id: string;
@@ -26,7 +27,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     // Stub auth: create a demo user for development
     const demoUser = {
-      id: 'demo-user-id',
+      id: DEMO_USER_ID,
       email: 'demo@luxsnap.com'
     };
     setUser(demoUser);

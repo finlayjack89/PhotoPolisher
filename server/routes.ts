@@ -3,6 +3,7 @@ import express, { type Request, type Response } from "express";
 import multer from "multer";
 import type { IStorage } from "./storage";
 import { insertUserQuotaSchema, insertProcessingCacheSchema, insertBackdropLibrarySchema, insertBatchImageSchema, insertProjectBatchSchema, imageJobs } from "@shared/schema";
+import { DEMO_USER_ID } from "@shared/constants";
 import { z } from "zod";
 import { getDb } from "./db";
 import { processJob } from "./image-processing/process-job";
@@ -86,8 +87,6 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
 
   app.post("/api/process-image", express.json(), async (req: Request, res: Response) => {
     const db = getDb();
-    // Since auth is a stub, we'll use a hardcoded user ID
-    const demoUserId = "demo-user-id";
     const { original_image_url, processing_options } = req.body;
 
     if (!original_image_url) {
@@ -99,7 +98,7 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
       const [job] = await db
         .insert(imageJobs)
         .values({
-          userId: demoUserId,
+          userId: DEMO_USER_ID,
           originalImageUrl: original_image_url,
           processingOptions: processing_options,
           status: 'pending',
@@ -126,7 +125,6 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
 
   app.get("/api/job-status/:id", async (req: Request, res: Response) => {
     const db = getDb();
-    const demoUserId = "demo-user-id";
     const jobId = req.params.id;
 
     if (!jobId) {
@@ -137,7 +135,7 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
       const job = await db.query.imageJobs.findFirst({
         where: and(
           eq(imageJobs.id, jobId),
-          eq(imageJobs.userId, demoUserId)
+          eq(imageJobs.userId, DEMO_USER_ID)
         ),
         columns: {
           status: true,

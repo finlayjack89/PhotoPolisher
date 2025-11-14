@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useWorkflow } from '@/contexts/WorkflowContext';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { CommercialEditingWorkflow } from '@/components/CommercialEditingWorkflow';
 import { Button } from '@/components/ui/button';
@@ -9,17 +9,15 @@ import { removeBackgroundWithFileIds, createBatch, queryClient } from '@/lib/api
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { DEMO_USER_ID } from '@/lib/constants';
 
 type WorkflowStep = 'upload' | 'remove-bg' | 'position' | 'finalize';
 
 const WorkflowPage = () => {
   const { step } = useParams<{ step: WorkflowStep }>();
   const navigate = useNavigate();
-  const { state, setStep, setProcessedSubjects, setBatchId, getAllUploadedFiles } = useWorkflow();
+  const { state, files, hasMissingFiles, setStep, setProcessedSubjects, setBatchId } = useWorkflow();
   const { toast } = useToast();
-  
-  const files = getAllUploadedFiles();
-  const hasMissingFiles = state.uploadedFileIds.length > 0 && files.length === 0;
 
   useEffect(() => {
     if (step && ['upload', 'remove-bg', 'position', 'finalize'].includes(step)) {
@@ -89,7 +87,7 @@ const WorkflowPage = () => {
     if (state.uploadedFileIds.length === 0 && !hasMissingFiles) {
       navigate('/');
     }
-  }, [state.uploadedFileIds, hasMissingFiles, navigate]);
+  }, [state.uploadedFileIds.length, hasMissingFiles, navigate]);
 
   const handleBack = () => {
     navigate(-1);
@@ -123,7 +121,7 @@ const WorkflowPage = () => {
     }
     
     createBatchMutation.mutate({
-      userId: 'demo-user-id',
+      userId: DEMO_USER_ID,
       backdropFileId: state.selectedBackdropId,
       aspectRatio: '1:1',
       positioning: state.positioning,
