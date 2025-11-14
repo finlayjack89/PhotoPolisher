@@ -2,11 +2,12 @@
 import express, { type Request, type Response } from "express";
 import multer from "multer";
 import type { IStorage } from "./storage";
-import { insertUserQuotaSchema, insertProcessingCacheSchema, insertBackdropLibrarySchema, insertBatchImageSchema, insertProjectBatchSchema, imageJobs } from "@shared/schema";
+import { insertUserQuotaSchema, insertProcessingCacheSchema, insertBackdropLibrarySchema, insertBatchImageSchema, insertProjectBatchSchema, imageJobs, backgroundJobs } from "@shared/schema";
 import { DEMO_USER_ID } from "@shared/constants";
 import { z } from "zod";
 import { getDb } from "./db";
 import { processJob } from "./image-processing/process-job";
+import { processBackgroundRemoval } from "./workers/process-background-removal";
 import { eq, and } from "drizzle-orm";
 
 // This function signature matches your original file
@@ -180,6 +181,94 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
 
     } catch (err) {
       console.error(`Error fetching job status for ${jobId}:`, err);
+      res.status(500).json({ error: 'Failed to fetch job status' });
+    }
+  });
+
+  app.post("/api/background-removal-jobs", express.json(), async (req: Request, res: Response) => {
+    const db = getDb();
+
+    try {
+      const requestSchema = z.object({
+        fileIds: z.array(z.string()).min(1, "At least one file ID required"),
+      });
+
+      const { fileIds } = requestSchema.parse(req.body);
+
+      const [job] = await db
+        .insert(backgroundJobs)
+        .values({
+          userId: DEMO_USER_ID,
+          status: 'pending',
+          fileIds: fileIds,
+          progress: { completed: 0, total: fileIds.length },
+          results: [],
+        })
+        .returning({ id: backgroundJobs.id });
+
+      if (!job) {
+        throw new Error('Failed to create background removal job');
+      }
+
+      const jobId = job.id;
+
+      processBackgroundRemoval(jobId, db, storage, fileIds);
+
+      res.status(202).json({ jobId });
+
+    } catch (err) {
+      console.error('Error creating background removal job:', err);
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: err.errors[0].message });
+      }
+      res.status(500).json({ error: 'Failed to create background removal job' });
+    }
+  });
+
+  app.get("/api/background-removal-jobs/:id", async (req: Request, res: Response) => {
+    const db = getDb();
+    const jobId = req.params.id;
+
+    if (!jobId) {
+      return res.status(400).json({ error: 'Job ID is required' });
+    }
+
+    try {
+      const job = await db.query.backgroundJobs.findFirst({
+        where: and(
+          eq(backgroundJobs.id, jobId),
+          eq(backgroundJobs.userId, DEMO_USER_ID)
+        ),
+        columns: {
+          status: true,
+          progress: true,
+          results: true,
+          errorMessage: true,
+        },
+      });
+
+      if (!job) {
+        console.warn(`Background removal job not found or permission error for job ${jobId}`);
+        return res.status(404).json({ error: 'Job not found' });
+      }
+
+      const response: any = {
+        status: job.status,
+        progress: job.progress,
+      };
+
+      if (job.status === 'completed') {
+        response.results = job.results;
+      }
+
+      if (job.status === 'failed') {
+        response.error_message = job.errorMessage;
+      }
+
+      res.json(response);
+
+    } catch (err) {
+      console.error(`Error fetching background removal job status for ${jobId}:`, err);
       res.status(500).json({ error: 'Failed to fetch job status' });
     }
   });
@@ -372,6 +461,11 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
 
   // Image Processing Routes
 
+  // DEPRECATED: Synchronous background removal endpoints (Nov 14, 2025)
+  // These endpoints process images synchronously, blocking Node.js event loop for 5-6 seconds
+  // This causes Vite WebSocket to disconnect, making frontend think server timed out
+  // Replaced with async job queue pattern: POST /api/background-removal-jobs
+  /*
   app.post("/api/remove-backgrounds", validatePayloadSize, async (req: Request, res: Response) => {
     try {
       const { removeBackgrounds } = await import("./image-processing/remove-backgrounds");
@@ -452,6 +546,7 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
       res.status(500).json({ error: error instanceof Error ? error.message : "Background removal failed" });
     }
   });
+  */
 
   // COMMENTED OUT: TinyPNG compression endpoint (Phase 1 stabilization)
   // Client-side compression already handles this, making server-side compression redundant

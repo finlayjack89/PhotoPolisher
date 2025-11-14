@@ -5,7 +5,7 @@ import { useMutation } from '@tanstack/react-query';
 import { CommercialEditingWorkflow } from '@/components/CommercialEditingWorkflow';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Home, Loader2, Scissors, Save, RefreshCw } from 'lucide-react';
-import { removeBackgroundWithFileIds, createBatch, queryClient } from '@/lib/api-client';
+import { createBackgroundRemovalJob, getBackgroundRemovalJobStatus, createBatch, queryClient } from '@/lib/api-client';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -26,7 +26,35 @@ const WorkflowPage = () => {
   }, [step, state.step, setStep]);
 
   const removeBackgroundMutation = useMutation({
-    mutationFn: removeBackgroundWithFileIds,
+    mutationFn: async (fileIds: string[]) => {
+      // Step 1: Create job
+      const { jobId } = await createBackgroundRemovalJob(fileIds);
+      
+      // Step 2: Poll for completion
+      const pollInterval = 2000; // 2 seconds
+      const maxPolls = 150; // 5 minutes max (150 * 2s = 300s)
+      
+      for (let i = 0; i < maxPolls; i++) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        
+        const jobStatus = await getBackgroundRemovalJobStatus(jobId);
+        
+        if (jobStatus.status === 'completed') {
+          return { subjects: jobStatus.results || [] };
+        }
+        
+        if (jobStatus.status === 'failed') {
+          throw new Error(jobStatus.error_message || 'Background removal failed');
+        }
+        
+        // Update UI with progress (optional)
+        if (jobStatus.progress) {
+          console.log(`Background removal progress: ${jobStatus.progress.completed}/${jobStatus.progress.total}`);
+        }
+      }
+      
+      throw new Error('Background removal timeout - job took too long');
+    },
     onSuccess: (data) => {
       console.log('Background removal successful:', data);
       const successCount = data.subjects.filter(s => !s.error).length;
@@ -42,10 +70,11 @@ const WorkflowPage = () => {
       }));
       
       setProcessedSubjects(processedSubjects);
-      
+      navigate('/workflow/position');
+
       toast({
-        title: 'Background Removal Complete',
-        description: `Successfully processed ${successCount} images${errorCount > 0 ? `, ${errorCount} failed` : ''}`,
+        title: "Background Removal Complete",
+        description: `Successfully processed ${successCount} image(s)${errorCount > 0 ? `, ${errorCount} failed` : ''}`,
       });
     },
     onError: (error: Error) => {

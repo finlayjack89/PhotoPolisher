@@ -120,6 +120,29 @@ export const insertImageJobSchema = createInsertSchema(imageJobs, {}).omit({ id:
 export type InsertImageJob = z.infer<typeof insertImageJobSchema>;
 export type ImageJob = typeof imageJobs.$inferSelect;
 
+// Background Removal Jobs Table (async background removal processing)
+export const backgroundJobs = pgTable('background_jobs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull(),
+  status: imageJobStatusEnum('status').default('pending').notNull(),
+  fileIds: jsonb('file_ids').$type<string[]>().notNull(),
+  results: jsonb('results').$type<Array<{
+    originalFileId: string;
+    processedFileId?: string;
+    processedUrl?: string;
+    error?: string;
+  }>>().default([]),
+  progress: jsonb('progress').$type<{completed: number, total: number}>(),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).default(sql`NOW() + INTERVAL '2 hours'`),
+});
+
+export const insertBackgroundJobSchema = createInsertSchema(backgroundJobs, {}).omit({ id: true, createdAt: true }) as any;
+export type InsertBackgroundJob = z.infer<typeof insertBackgroundJobSchema>;
+export type BackgroundJob = typeof backgroundJobs.$inferSelect;
+
 // Project Batches Table (for workflow state persistence)
 export const projectBatches = pgTable('project_batches', {
   id: uuid('id').defaultRandom().primaryKey(),

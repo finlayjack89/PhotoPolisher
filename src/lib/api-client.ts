@@ -315,6 +315,41 @@ export async function removeBackgroundWithFileIds(fileIds: string[]): Promise<{
 }
 
 /**
+ * Create background removal job (async)
+ * @param fileIds Array of file IDs to process
+ * @returns Object with jobId
+ */
+export async function createBackgroundRemovalJob(fileIds: string[]): Promise<{ jobId: string }> {
+  return apiRequest('/api/background-removal-jobs', {
+    method: 'POST',
+    body: JSON.stringify({ fileIds }),
+    timeout: 10000, // Job creation is fast, only needs 10s
+  });
+}
+
+/**
+ * Get background removal job status
+ * @param jobId Job ID to check
+ * @returns Job status, progress, and results
+ */
+export async function getBackgroundRemovalJobStatus(jobId: string): Promise<{
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  progress?: { completed: number; total: number };
+  results?: Array<{
+    originalFileId: string;
+    processedFileId?: string;
+    processedUrl?: string;
+    error?: string;
+  }>;
+  error_message?: string;
+}> {
+  return apiRequest(`/api/background-removal-jobs/${jobId}`, {
+    method: 'GET',
+    timeout: 5000, // Status check is fast
+  });
+}
+
+/**
  * Create a new project batch
  * @param batchData The batch configuration
  * @returns The created batch object
