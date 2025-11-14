@@ -136,9 +136,20 @@ export class ImageProcessingService {
       this.updateProgress(onProgress, 50, 'processing');
 
       // Call the appropriate Express API endpoint
+      // NOTE: Compression is skipped (Phase 1 stabilization - client-side compression handles this)
       const data = operation === 'upscale' 
         ? await api.upscaleImages(payload)
-        : await api.compressImages(payload);
+        : { 
+            success: true, 
+            compressedFiles: [{
+              originalName: fileName,
+              processedName: fileName,
+              data: imageData,
+              size: this.estimateFileSize(imageData),
+              format: 'png',
+              compressionRatio: 'Client-side compression already applied'
+            }]
+          };
 
       // Update progress: downloading
       this.updateProgress(onProgress, 80, 'downloading');

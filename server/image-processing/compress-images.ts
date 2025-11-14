@@ -1,3 +1,18 @@
+/**
+ * DEPRECATED: TinyPNG Server-Side Compression
+ * 
+ * This endpoint is deprecated and commented out as of Phase 1 stabilization.
+ * Client-side compression is already handling image optimization before upload,
+ * making this redundant server-side compression unnecessary.
+ * 
+ * Removing this eliminates:
+ * - Redundant API calls to TinyPNG
+ * - Server-side processing overhead
+ * - Potential timeout issues from double compression
+ * 
+ * If needed in the future, uncomment the endpoint in server/routes.ts
+ */
+
 import fetch from 'node-fetch';
 
 interface CompressImagesRequest {

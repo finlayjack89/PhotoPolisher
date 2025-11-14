@@ -57,8 +57,53 @@ export class MemStorage implements IStorage {
   private systemHealth: SystemHealth[] = [];
   private backdropLibrary: Map<string, BackdropLibrary> = new Map();
   private batchImages: Map<string, BatchImage> = new Map();
-  private files: Map<string, { file: File; buffer: Buffer }> = new Map();
+  private files: Map<string, { file: File; buffer: Buffer; createdAt: Date }> = new Map();
   private projectBatches: Map<string, ProjectBatch> = new Map();
+  private cleanupInterval: NodeJS.Timeout | null = null;
+
+  constructor() {
+    // Start auto-cleanup of old files (runs every 15 minutes)
+    this.startAutoCleanup();
+  }
+
+  /**
+   * Start automatic cleanup of old files (Phase 1 stabilization)
+   * Removes files older than 2 hours to prevent memory accumulation
+   */
+  private startAutoCleanup() {
+    const FIFTEEN_MINUTES = 15 * 60 * 1000;
+    
+    // Initial cleanup on startup
+    this.cleanupOldFiles();
+    
+    // Schedule recurring cleanup
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupOldFiles();
+    }, FIFTEEN_MINUTES);
+    
+    console.log('[MemStorage] Auto-cleanup started (runs every 15 minutes)');
+  }
+
+  /**
+   * Cleanup files older than 2 hours (Phase 1 stabilization)
+   */
+  cleanupOldFiles() {
+    const TWO_HOURS = 2 * 60 * 60 * 1000;
+    const now = Date.now();
+    let deletedCount = 0;
+    
+    for (const [fileId, data] of this.files) {
+      const age = now - data.createdAt.getTime();
+      if (age > TWO_HOURS) {
+        this.files.delete(fileId);
+        deletedCount++;
+      }
+    }
+    
+    if (deletedCount > 0) {
+      console.log(`[MemStorage] Cleaned up ${deletedCount} old files. Total files: ${this.files.size}`);
+    }
+  }
 
   async getUserQuota(userId: string): Promise<UserQuota | null> {
     for (const [_, quota] of this.userQuotas) {
@@ -233,7 +278,8 @@ export class MemStorage implements IStorage {
       createdAt: now,
     };
     
-    this.files.set(id, { file: newFile, buffer });
+    // Store file with createdAt timestamp for auto-cleanup
+    this.files.set(id, { file: newFile, buffer, createdAt: now });
     console.log(`[MemStorage] File created: ${id} (${fileData.originalFilename}, ${fileData.bytes} bytes). Total files in storage: ${this.files.size}`);
     return newFile;
   }

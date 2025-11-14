@@ -19,6 +19,59 @@ async function generateSignature(stringToSign: string, apiSecret: string): Promi
   return crypto.createHash('sha1').update(stringToSign).digest('hex');
 }
 
+/**
+ * Fetch with timeout (Phase 1 stabilization)
+ * Prevents hanging requests to Cloudinary API
+ */
+async function fetchWithTimeout(url: string, options: any, timeout: number = 30000): Promise<any> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timeout after ${timeout}ms`);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Retry wrapper with exponential backoff (Phase 1 stabilization)
+ * Handles transient Cloudinary API failures
+ */
+async function retryWithBackoff<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 2000
+): Promise<T> {
+  let lastError: any;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      lastError = error;
+      
+      if (attempt < maxRetries - 1) {
+        const delay = baseDelay * Math.pow(2, attempt); // Exponential backoff: 2s, 4s, 8s
+        console.warn(`Cloudinary request failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`, error.message);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  
+  console.error(`Cloudinary request failed after ${maxRetries} attempts:`, lastError);
+  throw lastError;
+}
+
 export async function addDropShadow(req: AddDropShadowRequest) {
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
   const apiKey = process.env.CLOUDINARY_API_KEY;
@@ -46,12 +99,16 @@ export async function addDropShadow(req: AddDropShadowRequest) {
     uploadData.append('signature', uploadSignature);
     uploadData.append('folder', folder);
 
-    const uploadResponse = await fetch(
-      `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
-      {
-        method: 'POST',
-        body: uploadData,
-      }
+    // Use timeout and retry logic for preview upload
+    const uploadResponse = await retryWithBackoff(
+      () => fetchWithTimeout(
+        `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+        {
+          method: 'POST',
+          body: uploadData,
+        },
+        30000
+      )
     );
 
     if (!uploadResponse.ok) {
@@ -96,12 +153,16 @@ export async function addDropShadow(req: AddDropShadowRequest) {
 
       console.log(`Uploading ${img.name} to Cloudinary with signed upload...`);
 
-      const uploadResponse = await fetch(
-        `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
-        {
-          method: 'POST',
-          body: uploadData,
-        }
+      // Use timeout and retry logic for image upload
+      const uploadResponse = await retryWithBackoff(
+        () => fetchWithTimeout(
+          `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+          {
+            method: 'POST',
+            body: uploadData,
+          },
+          30000
+        )
       );
 
       if (!uploadResponse.ok) {
@@ -123,7 +184,10 @@ export async function addDropShadow(req: AddDropShadowRequest) {
 
       console.log(`Transformation URL: ${transformedUrl}`);
 
-      const transformedResponse = await fetch(transformedUrl);
+      // Use timeout and retry logic for transformed image fetch
+      const transformedResponse = await retryWithBackoff(
+        () => fetchWithTimeout(transformedUrl, {}, 30000)
+      );
 
       if (!transformedResponse.ok) {
         throw new Error(`Failed to fetch transformed image: ${transformedResponse.status}`);
@@ -153,12 +217,14 @@ export async function addDropShadow(req: AddDropShadowRequest) {
         deleteData.append('api_key', apiKey);
         deleteData.append('timestamp', deleteTimestamp.toString());
 
-        const deleteResponse = await fetch(
+        // Use timeout for cleanup (no retry needed for cleanup)
+        const deleteResponse = await fetchWithTimeout(
           `https://api.cloudinary.com/v1_1/${cloudName}/image/destroy`,
           {
             method: 'POST',
             body: deleteData,
-          }
+          },
+          30000
         );
 
         if (deleteResponse.ok) {

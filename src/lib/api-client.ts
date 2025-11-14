@@ -4,29 +4,46 @@ import { QueryClient } from '@tanstack/react-query';
 export const queryClient = new QueryClient();
 
 /**
- * Generic API request helper
+ * Generic API request helper with timeout support (Phase 1 stabilization)
  */
-export async function apiRequest<T = any>(endpoint: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(endpoint, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  });
+export async function apiRequest<T = any>(
+  endpoint: string, 
+  options?: RequestInit & { timeout?: number }
+): Promise<T> {
+  const timeout = options?.timeout || 60000; // 60s default timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(endpoint, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options?.headers,
+      },
+    });
+    clearTimeout(timeoutId);
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(error.error || `API request failed: ${response.status}`);
-  }
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || `API request failed: ${response.status}`);
+    }
 
-  // Handle 202 Accepted (for job creation)
-  if (response.status === 202) {
+    // Handle 202 Accepted (for job creation)
+    if (response.status === 202) {
+      return response.json();
+    }
+
+    // Handle 200 OK
     return response.json();
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timeout after ${timeout}ms`);
+    }
+    throw error;
   }
-
-  // Handle 200 OK
-  return response.json();
 }
 
 export const api = {
@@ -99,10 +116,12 @@ export const api = {
 
   // --- Other endpoints ---
 
-  compressImages: (data: any) => apiRequest('/api/compress-images', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
+  // COMMENTED OUT: TinyPNG compression (Phase 1 stabilization)
+  // Client-side compression already handles this
+  // compressImages: (data: any) => apiRequest('/api/compress-images', {
+  //   method: 'POST',
+  //   body: JSON.stringify(data),
+  // }),
 
   analyzeImages: (data: any) => apiRequest('/api/analyze-images', {
     method: 'POST',
@@ -146,6 +165,18 @@ export const api = {
     }
 
     return response.json();
+  },
+
+  /**
+   * Delete a file from storage by file ID
+   * Used for cleanup after workflow completion (Phase 1 stabilization)
+   * @param fileId The file ID to delete
+   * @returns Success status
+   */
+  deleteFile: async (fileId: string): Promise<{ success: boolean }> => {
+    return apiRequest(`/api/files/${fileId}`, {
+      method: 'DELETE',
+    });
   },
 };
 

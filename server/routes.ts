@@ -83,9 +83,31 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
     }
   });
 
+  app.delete("/api/files/:fileId", async (req: Request, res: Response) => {
+    try {
+      const deleted = await storage.deleteFile(req.params.fileId);
+      if (!deleted) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("File deletion error:", error);
+      res.status(500).json({ error: "Failed to delete file" });
+    }
+  });
+
   // --- NEW JOB QUEUE ENDPOINTS (NO AUTH) ---
 
-  app.post("/api/process-image", express.json(), async (req: Request, res: Response) => {
+  // Payload size validation middleware (Phase 1 stabilization - prevent memory issues)
+  const validatePayloadSize = (req: Request, res: Response, next: any) => {
+    const contentLength = req.headers['content-length'];
+    if (contentLength && parseInt(contentLength) > 50 * 1024 * 1024) {
+      return res.status(413).json({ error: 'Payload too large (max 50MB)' });
+    }
+    next();
+  };
+
+  app.post("/api/process-image", validatePayloadSize, express.json(), async (req: Request, res: Response) => {
     const db = getDb();
     const { original_image_url, processing_options } = req.body;
 
@@ -350,7 +372,7 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
 
   // Image Processing Routes
 
-  app.post("/api/remove-backgrounds", async (req: Request, res: Response) => {
+  app.post("/api/remove-backgrounds", validatePayloadSize, async (req: Request, res: Response) => {
     try {
       const { removeBackgrounds } = await import("./image-processing/remove-backgrounds");
       const result = await removeBackgrounds(req.body);
@@ -431,16 +453,18 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
     }
   });
 
-  app.post("/api/compress-images", async (req: Request, res: Response) => {
-    try {
-      const { compressImages } = await import("./image-processing/compress-images");
-      const result = await compressImages(req.body);
-      res.json(result);
-    } catch (error) {
-      console.error("Error in compress-images:", error);
-      res.status(500).json({ error: error instanceof Error ? error.message : "Compression failed" });
-    }
-  });
+  // COMMENTED OUT: TinyPNG compression endpoint (Phase 1 stabilization)
+  // Client-side compression already handles this, making server-side compression redundant
+  // app.post("/api/compress-images", async (req: Request, res: Response) => {
+  //   try {
+  //     const { compressImages } = await import("./image-processing/compress-images");
+  //     const result = await compressImages(req.body);
+  //     res.json(result);
+  //   } catch (error) {
+  //     console.error("Error in compress-images:", error);
+  //     res.status(500).json({ error: error instanceof Error ? error.message : "Compression failed" });
+  //   }
+  // });
 
   app.post("/api/analyze-images", async (req: Request, res: Response) => {
     try {

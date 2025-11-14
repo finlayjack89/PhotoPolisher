@@ -1,4 +1,24 @@
 /**
+ * Client-Side Reflection Generation
+ * 
+ * Reflections are generated entirely in the browser using Canvas API.
+ * NO external API calls are made - this is a purely client-side operation
+ * that happens during final compositing after shadows are applied.
+ * 
+ * Process:
+ * 1. Takes clean subject image (without shadow)
+ * 2. Flips vertically using canvas transforms
+ * 3. Applies gradient fade for realistic effect
+ * 4. Returns as data URL for compositing
+ * 
+ * Benefits:
+ * - Zero server load
+ * - No API timeouts
+ * - Instant results
+ * - No external dependencies
+ */
+
+/**
  * Reflection generation utilities for product images
  * Creates realistic reflections using canvas transformations
  */

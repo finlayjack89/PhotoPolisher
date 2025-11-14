@@ -1,3 +1,18 @@
+/**
+ * Background Removal using Replicate API
+ * 
+ * NOTE: Replicate API requires base64 data URLs for image input.
+ * The API does not support binary uploads or external URLs for this model.
+ * This is a limitation of the specific model (BRIA RMBG 1.4) being used.
+ * 
+ * Optimization opportunity: Future investigation could explore:
+ * - Alternative Replicate models that support URL input
+ * - Direct binary upload if supported in newer API versions
+ * - Switching to a different background removal service
+ * 
+ * Current implementation uses base64 which works reliably but has size overhead.
+ */
+
 import fetch from 'node-fetch';
 
 interface RemoveBackgroundRequest {

@@ -8,6 +8,8 @@ import { BatchProcessingStep } from './BatchProcessingStep';
 import { SubjectPlacement } from "@/lib/canvas-utils";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
+import { useWorkflow } from "@/contexts/WorkflowContext";
+import { api } from "@/lib/api-client";
 
 interface CommercialEditingWorkflowProps {
   files: (File & { isPreCut?: boolean })[];
@@ -71,6 +73,7 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
   const [processedImages, setProcessedImages] = useState<ProcessedImages>({ backgroundRemoved: [] });
   const [processedSubjects, setProcessedSubjects] = useState<any[]>([]);
   const { toast } = useToast();
+  const workflowContext = useWorkflow();
 
   // Handle analysis step completion - just advances to next step
   const handleAnalysisComplete = async () => {
@@ -234,11 +237,50 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
           aspectRatio: processedImages.masterAspectRatio
         }}
         isPreCut={!wentThroughBackgroundRemoval}
-        onComplete={(results) => {
+        onComplete={async (results) => {
           setProcessedImages(prev => ({
             ...prev,
             finalComposited: results
           }));
+          
+          // Clean up intermediate files (Phase 1 stabilization - prevent memory accumulation)
+          try {
+            const filesToDelete: string[] = [];
+            
+            // Collect uploaded file IDs
+            if (workflowContext.state.uploadedFileIds) {
+              filesToDelete.push(...workflowContext.state.uploadedFileIds);
+            }
+            
+            // Collect processed (background-removed) file IDs
+            if (workflowContext.state.processedSubjects) {
+              workflowContext.state.processedSubjects.forEach(subject => {
+                if (subject.processedFileId) {
+                  filesToDelete.push(subject.processedFileId);
+                }
+              });
+            }
+            
+            // Delete files asynchronously (don't wait for completion to avoid blocking UI)
+            if (filesToDelete.length > 0) {
+              console.log(`🗑️ Cleaning up ${filesToDelete.length} intermediate files...`);
+              
+              // Delete files in background
+              Promise.all(
+                filesToDelete.map(fileId =>
+                  api.deleteFile(fileId).catch(err => {
+                    console.warn(`Failed to delete file ${fileId}:`, err);
+                  })
+                )
+              ).then(() => {
+                console.log(`✅ Cleaned up ${filesToDelete.length} intermediate files`);
+              });
+            }
+          } catch (error) {
+            console.error('Error cleaning up files:', error);
+            // Don't block workflow on cleanup errors
+          }
+          
           setCurrentStep('complete');
         }}
         onBack={() => {
