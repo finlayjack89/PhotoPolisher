@@ -208,3 +208,47 @@ Preferred communication style: Simple, everyday language.
 5. **Clear documentation**: Reflections (client-side) and Replicate (base64 requirement) documented
 
 **Effect**: Critical timeout issues addressed. Server stable for long-running sessions with large images. Remaining work: integrate WorkflowContext file tracking, verify compression skip doesn't break downstream components.
+
+---
+
+### November 14, 2025 - CRITICAL BUG FIX: Pre-Cut Image FileReader Error
+
+**Problem**: Batch processing failed with FileReader error when processing pre-cut images (transparent PNGs that skip background removal). Error: `"Failed to execute 'readAsDataURL' on 'FileReader': parameter 1 is not of type 'Blob'"`. This caused server timeouts and prevented workflow completion despite background removal working correctly.
+
+**Root Cause**: 
+CommercialEditingWorkflow.tsx passed `processedSubjects` (Subject objects with `backgroundRemovedData` strings) to BatchProcessingStep, but dynamically set `isPreCut` flag based on whether background removal occurred. For pre-cut images, `isPreCut=true` caused BatchProcessingStep to call `fileToDataUrl(subject as File)`, but `subject` was a ProcessedSubject object, not a File/Blob. FileReader.readAsDataURL() threw error when receiving non-Blob input.
+
+**Solution**: 
+Fixed CommercialEditingWorkflow.tsx line 240 to ALWAYS set `isPreCut=false` when passing `processedSubjects` to BatchProcessingStep. This ensures BatchProcessingStep uses `(subject as Subject).backgroundRemovedData` (already a data URL string) instead of calling `fileToDataUrl()`, eliminating the FileReader error.
+
+**Code Change**:
+```typescript
+// BEFORE (CommercialEditingWorkflow.tsx line 226-239):
+const wentThroughBackgroundRemoval = currentStep === 'batch-processing' && 
+  processedSubjects.length > 0 && 
+  processedSubjects[0].originalData !== processedSubjects[0].backgroundRemovedData;
+
+return (
+  <BatchProcessingStep
+    subjects={processedSubjects}
+    isPreCut={!wentThroughBackgroundRemoval}  // <-- Dynamic, could cause error
+  />
+);
+
+// AFTER:
+return (
+  <BatchProcessingStep
+    subjects={processedSubjects}
+    isPreCut={false}  // <-- Always false when passing processedSubjects
+  />
+);
+```
+
+**Verification**:
+- ✅ Server running without errors
+- ✅ Zero LSP diagnostics
+- ✅ Architect-approved as production-ready
+- ✅ Fix eliminates FileReader error for pre-cut images
+- ✅ Maintains correct behavior for images that went through background removal
+
+**Effect**: Pre-cut images (transparent PNGs) now process correctly through batch workflow without FileReader errors. Timeout issue resolved - batch processing completes successfully for both pre-cut and background-removed images.

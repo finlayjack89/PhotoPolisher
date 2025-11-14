@@ -222,11 +222,9 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
     }
 
     // Always use processedSubjects for batch processing
-    // isPreCut should be based on whether we went through background removal step
-    const wentThroughBackgroundRemoval = currentStep === 'batch-processing' && 
-      processedSubjects.length > 0 && 
-      processedSubjects[0].originalData !== processedSubjects[0].backgroundRemovedData;
-    
+    // Since we're passing processedSubjects (Subject objects with backgroundRemovedData),
+    // isPreCut must ALWAYS be false. Setting it to true would cause BatchProcessingStep
+    // to call fileToDataUrl(subject as File), which fails because subjects are not File objects.
     return (
       <BatchProcessingStep
         subjects={processedSubjects}
@@ -236,7 +234,7 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
           padding: processedImages.masterPadding,
           aspectRatio: processedImages.masterAspectRatio
         }}
-        isPreCut={!wentThroughBackgroundRemoval}
+        isPreCut={false}
         onComplete={async (results) => {
           setProcessedImages(prev => ({
             ...prev,
