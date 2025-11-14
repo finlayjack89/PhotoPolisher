@@ -12,7 +12,7 @@ const Index = () => {
   const [isUploading, setIsUploading] = useState(false);
   const navigate = useNavigate();
   const { user, signOut, loading } = useAuth();
-  const { setUploadedFileIds, setStep } = useWorkflow();
+  const { setUploadedFileIds, setStep, addUploadedFile } = useWorkflow();
   const { toast } = useToast();
 
   const handleFilesUploaded = async (files: File[]) => {
@@ -35,7 +35,10 @@ const Index = () => {
         }
         
         const result = await response.json();
-        fileIds.push(result.fileId);
+        const fileId = result.fileId;
+        
+        addUploadedFile(fileId, file);
+        fileIds.push(fileId);
       }
       
       setUploadedFileIds(fileIds);

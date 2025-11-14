@@ -1,23 +1,25 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useWorkflow } from '@/contexts/WorkflowContext';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { CommercialEditingWorkflow } from '@/components/CommercialEditingWorkflow';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Home, Loader2, Scissors, Save } from 'lucide-react';
+import { ArrowLeft, Home, Loader2, Scissors, Save, RefreshCw } from 'lucide-react';
 import { removeBackgroundWithFileIds, createBatch, queryClient } from '@/lib/api-client';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 type WorkflowStep = 'upload' | 'remove-bg' | 'position' | 'finalize';
 
 const WorkflowPage = () => {
   const { step } = useParams<{ step: WorkflowStep }>();
   const navigate = useNavigate();
-  const { state, setStep, setProcessedSubjects, setBatchId } = useWorkflow();
-  const [files, setFiles] = useState<File[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { state, setStep, setProcessedSubjects, setBatchId, getAllUploadedFiles } = useWorkflow();
   const { toast } = useToast();
+  
+  const files = getAllUploadedFiles();
+  const hasMissingFiles = state.uploadedFileIds.length > 0 && files.length === 0;
 
   useEffect(() => {
     if (step && ['upload', 'remove-bg', 'position', 'finalize'].includes(step)) {
@@ -84,42 +86,10 @@ const WorkflowPage = () => {
   });
 
   useEffect(() => {
-    const fetchFiles = async () => {
-      if (state.uploadedFileIds.length === 0) {
-        navigate('/');
-        return;
-      }
-
-      try {
-        setIsLoading(true);
-        const fetchedFiles: File[] = [];
-
-        for (const fileId of state.uploadedFileIds) {
-          const response = await fetch(`/api/files/${fileId}`);
-          if (!response.ok) {
-            console.error(`Failed to fetch file ${fileId}`);
-            continue;
-          }
-
-          const blob = await response.blob();
-          const contentType = response.headers.get('content-type') || 'image/jpeg';
-          const fileName = `file-${fileId}.${contentType.split('/')[1]}`;
-          
-          const file = new File([blob], fileName, { type: contentType });
-          fetchedFiles.push(file);
-        }
-
-        setFiles(fetchedFiles);
-      } catch (error) {
-        console.error('Error fetching files:', error);
-        navigate('/');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchFiles();
-  }, [state.uploadedFileIds, navigate]);
+    if (state.uploadedFileIds.length === 0 && !hasMissingFiles) {
+      navigate('/');
+    }
+  }, [state.uploadedFileIds, hasMissingFiles, navigate]);
 
   const handleBack = () => {
     navigate(-1);
@@ -200,11 +170,30 @@ const WorkflowPage = () => {
       </header>
 
       <main className="container mx-auto px-6 py-8">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-electric" />
-            <span className="ml-3 text-lg text-muted-foreground">Loading files...</span>
-          </div>
+        {hasMissingFiles ? (
+          <Alert variant="destructive" className="mb-6" data-testid="alert-missing-files">
+            <RefreshCw className="h-4 w-4" />
+            <AlertTitle>Files Lost Due to Page Refresh</AlertTitle>
+            <AlertDescription className="mt-2 space-y-4">
+              <p>
+                Your uploaded files were lost because the page was refreshed. 
+                Files are stored in browser memory during the session and cannot persist across page reloads.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Note: In production, files would be persisted to disk or cloud storage (S3) for permanent access.
+                This is a session-only demo environment.
+              </p>
+              <Button 
+                onClick={() => navigate('/')}
+                variant="outline"
+                data-testid="button-start-over"
+                className="mt-2"
+              >
+                <Home className="h-4 w-4 mr-2" />
+                Start Over
+              </Button>
+            </AlertDescription>
+          </Alert>
         ) : (
           <>
             {step === 'remove-bg' && state.uploadedFileIds.length > 0 && (

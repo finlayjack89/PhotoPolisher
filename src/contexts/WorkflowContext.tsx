@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 
 interface WorkflowState {
   step: 'upload' | 'remove-bg' | 'position' | 'finalize';
@@ -29,6 +29,9 @@ interface WorkflowContextType {
   setReflectionConfig: (config: any) => void;
   setBatchId: (id: string | null) => void;
   resetWorkflow: () => void;
+  addUploadedFile: (fileId: string, file: File) => void;
+  getUploadedFile: (fileId: string) => File | null;
+  getAllUploadedFiles: () => File[];
 }
 
 const WorkflowContext = createContext<WorkflowContextType | undefined>(undefined);
@@ -59,6 +62,25 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     }
     return initialState;
   });
+
+  /**
+   * Client-side file cache using in-memory Map.
+   * 
+   * IMPORTANT: This stores actual File objects in browser memory for the current session only.
+   * Files cannot be serialized to localStorage and will be lost on page refresh.
+   * 
+   * Production implementations should:
+   * - Store files on disk or cloud storage (S3, CDN, etc.)
+   * - Use file IDs to fetch from persistent storage when needed
+   * - Implement proper cleanup and lifecycle management
+   * 
+   * This approach works for:
+   * ✓ Back/forward navigation (same session)
+   * ✓ Fast access without server round-trips
+   * ✗ Page refresh (files are lost)
+   * ✗ Cross-tab/window sharing (each has own memory)
+   */
+  const uploadedFilesRef = useRef<Map<string, File>>(new Map());
 
   useEffect(() => {
     try {
@@ -103,6 +125,19 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const resetWorkflow = () => {
     setState(initialState);
     localStorage.removeItem(STORAGE_KEY);
+    uploadedFilesRef.current.clear();
+  };
+
+  const addUploadedFile = (fileId: string, file: File) => {
+    uploadedFilesRef.current.set(fileId, file);
+  };
+
+  const getUploadedFile = (fileId: string): File | null => {
+    return uploadedFilesRef.current.get(fileId) || null;
+  };
+
+  const getAllUploadedFiles = (): File[] => {
+    return Array.from(uploadedFilesRef.current.values());
   };
 
   const contextValue: WorkflowContextType = {
@@ -116,6 +151,9 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setReflectionConfig,
     setBatchId,
     resetWorkflow,
+    addUploadedFile,
+    getUploadedFile,
+    getAllUploadedFiles,
   };
 
   return (
