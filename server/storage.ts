@@ -11,6 +11,8 @@ import type {
   InsertBatchImage,
   File,
   InsertFile,
+  ProjectBatch,
+  InsertProjectBatch,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -40,6 +42,13 @@ export interface IStorage {
   getFile(fileId: string): Promise<{ file: File; buffer: Buffer } | null>;
   getFileByStorageKey(storageKey: string): Promise<{ file: File; buffer: Buffer } | null>;
   deleteFile(fileId: string): Promise<boolean>;
+  
+  // Project Batches
+  createBatch(batch: InsertProjectBatch): Promise<ProjectBatch>;
+  getBatch(id: string): Promise<ProjectBatch | null>;
+  getBatchesByUser(userId: string): Promise<ProjectBatch[]>;
+  updateBatch(id: string, updates: Partial<InsertProjectBatch>): Promise<ProjectBatch | null>;
+  deleteBatch(id: string, userId: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -49,6 +58,7 @@ export class MemStorage implements IStorage {
   private backdropLibrary: Map<string, BackdropLibrary> = new Map();
   private batchImages: Map<string, BatchImage> = new Map();
   private files: Map<string, { file: File; buffer: Buffer }> = new Map();
+  private projectBatches: Map<string, ProjectBatch> = new Map();
 
   async getUserQuota(userId: string): Promise<UserQuota | null> {
     for (const [_, quota] of this.userQuotas) {
@@ -158,8 +168,8 @@ export class MemStorage implements IStorage {
       id,
       userId: backdrop.userId,
       name: backdrop.name,
-      fileId: backdrop.fileId || null,
-      storagePath: backdrop.storagePath,
+      fileId: backdrop.fileId,
+      storagePath: backdrop.storagePath ?? null,
       width: backdrop.width ?? 1920,
       height: backdrop.height ?? 1080,
       createdAt: now,
@@ -195,8 +205,8 @@ export class MemStorage implements IStorage {
       batchId: image.batchId,
       name: image.name,
       imageType: image.imageType,
-      fileId: image.fileId || null,
-      storagePath: image.storagePath,
+      fileId: image.fileId,
+      storagePath: image.storagePath ?? null,
       fileSize: image.fileSize,
       dimensions: image.dimensions ?? { width: 0, height: 0 },
       sortOrder: image.sortOrder ?? 0,
@@ -246,6 +256,64 @@ export class MemStorage implements IStorage {
 
   async deleteFile(fileId: string): Promise<boolean> {
     return this.files.delete(fileId);
+  }
+
+  async createBatch(batch: InsertProjectBatch): Promise<ProjectBatch> {
+    const id = crypto.randomUUID();
+    const now = new Date();
+    const newBatch: ProjectBatch = {
+      id,
+      userId: batch.userId,
+      backdropFileId: batch.backdropFileId || null,
+      aspectRatio: batch.aspectRatio,
+      positioning: batch.positioning || null,
+      shadowConfig: batch.shadowConfig || null,
+      reflectionConfig: batch.reflectionConfig || null,
+      totalImages: batch.totalImages ?? 0,
+      status: batch.status ?? 'draft',
+      createdAt: now,
+    };
+    this.projectBatches.set(id, newBatch);
+    return newBatch;
+  }
+
+  async getBatch(id: string): Promise<ProjectBatch | null> {
+    return this.projectBatches.get(id) || null;
+  }
+
+  async getBatchesByUser(userId: string): Promise<ProjectBatch[]> {
+    const batches: ProjectBatch[] = [];
+    for (const [_, batch] of this.projectBatches) {
+      if (batch.userId === userId) {
+        batches.push(batch);
+      }
+    }
+    return batches.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  async updateBatch(id: string, updates: Partial<InsertProjectBatch>): Promise<ProjectBatch | null> {
+    const existing = this.projectBatches.get(id);
+    if (!existing) {
+      return null;
+    }
+    const updated: ProjectBatch = {
+      ...existing,
+      ...updates,
+      id: existing.id,
+      userId: existing.userId,
+      createdAt: existing.createdAt,
+    };
+    this.projectBatches.set(id, updated);
+    return updated;
+  }
+
+  async deleteBatch(id: string, userId: string): Promise<boolean> {
+    const batch = this.projectBatches.get(id);
+    if (batch && batch.userId === userId) {
+      this.projectBatches.delete(id);
+      return true;
+    }
+    return false;
   }
 
   private generateCacheKey(originalUrl: string, operation: string, optionsHash: string): string {

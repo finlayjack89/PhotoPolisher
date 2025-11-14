@@ -19,7 +19,7 @@ export const userQuotas = pgTable('user_quotas', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const insertUserQuotaSchema = createInsertSchema(userQuotas).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertUserQuotaSchema = createInsertSchema(userQuotas, {}).omit({ id: true, createdAt: true, updatedAt: true }) as any;
 export type InsertUserQuota = z.infer<typeof insertUserQuotaSchema>;
 export type UserQuota = typeof userQuotas.$inferSelect;
 
@@ -37,7 +37,7 @@ export const processingCache = pgTable('processing_cache', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
-export const insertProcessingCacheSchema = createInsertSchema(processingCache).omit({ id: true, createdAt: true });
+export const insertProcessingCacheSchema = createInsertSchema(processingCache, {}).omit({ id: true, createdAt: true }) as any;
 export type InsertProcessingCache = z.infer<typeof insertProcessingCacheSchema>;
 export type ProcessingCache = typeof processingCache.$inferSelect;
 
@@ -50,7 +50,7 @@ export const systemHealth = pgTable('system_health', {
   recordedAt: timestamp('recorded_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const insertSystemHealthSchema = createInsertSchema(systemHealth).omit({ id: true, recordedAt: true });
+export const insertSystemHealthSchema = createInsertSchema(systemHealth, {}).omit({ id: true, recordedAt: true }) as any;
 export type InsertSystemHealth = z.infer<typeof insertSystemHealthSchema>;
 export type SystemHealth = typeof systemHealth.$inferSelect;
 
@@ -67,7 +67,7 @@ export const backdropLibrary = pgTable('backdrop_library', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const insertBackdropLibrarySchema = createInsertSchema(backdropLibrary).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertBackdropLibrarySchema = createInsertSchema(backdropLibrary, {}).omit({ id: true, createdAt: true, updatedAt: true }) as any;
 export type InsertBackdropLibrary = z.infer<typeof insertBackdropLibrarySchema>;
 export type BackdropLibrary = typeof backdropLibrary.$inferSelect;
 
@@ -85,7 +85,7 @@ export const batchImages = pgTable('batch_images', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const insertBatchImageSchema = createInsertSchema(batchImages).omit({ id: true, createdAt: true });
+export const insertBatchImageSchema = createInsertSchema(batchImages, {}).omit({ id: true, createdAt: true }) as any;
 export type InsertBatchImage = z.infer<typeof insertBatchImageSchema>;
 export type BatchImage = typeof batchImages.$inferSelect;
 
@@ -99,7 +99,7 @@ export const files = pgTable('files', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const insertFileSchema = createInsertSchema(files).omit({ id: true, createdAt: true });
+export const insertFileSchema = createInsertSchema(files, {}).omit({ id: true, createdAt: true }) as any;
 export type InsertFile = z.infer<typeof insertFileSchema>;
 export type File = typeof files.$inferSelect;
 
@@ -116,6 +116,24 @@ export const imageJobs = pgTable('image_jobs', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).default(sql`NOW() + INTERVAL '1 hour'`),
 });
 
-export const insertImageJobSchema = createInsertSchema(imageJobs).omit({ id: true, createdAt: true });
+export const insertImageJobSchema = createInsertSchema(imageJobs, {}).omit({ id: true, createdAt: true }) as any;
 export type InsertImageJob = z.infer<typeof insertImageJobSchema>;
 export type ImageJob = typeof imageJobs.$inferSelect;
+
+// Project Batches Table (for workflow state persistence)
+export const projectBatches = pgTable('project_batches', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: text('user_id').notNull(),
+  backdropFileId: uuid('backdrop_file_id'),
+  aspectRatio: text('aspect_ratio').notNull(), // '1:1', '3:4', '9:16', '16:9'
+  positioning: jsonb('positioning').$type<{x: number, y: number, scale: number}>(),
+  shadowConfig: jsonb('shadow_config'),
+  reflectionConfig: jsonb('reflection_config'),
+  totalImages: integer('total_images').notNull().default(0),
+  status: text('status').notNull().default('draft'), // draft, processing, completed
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const insertProjectBatchSchema = createInsertSchema(projectBatches, {}).omit({ id: true, createdAt: true }) as any;
+export type InsertProjectBatch = z.infer<typeof insertProjectBatchSchema>;
+export type ProjectBatch = typeof projectBatches.$inferSelect;

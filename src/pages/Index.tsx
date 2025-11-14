@@ -1,21 +1,56 @@
 import { useState } from "react";
-import { Upload, Sparkles, Image as ImageIcon, Settings, LogOut, FolderOpen } from "lucide-react";
+import { Upload, Sparkles, Image as ImageIcon, Settings, LogOut, FolderOpen, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UploadZone } from "@/components/UploadZone";
-import { CommercialEditingWorkflow } from "@/components/CommercialEditingWorkflow";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useWorkflow } from "@/contexts/WorkflowContext";
+import { useToast } from "@/hooks/use-toast";
 import heroImage from "@/assets/hero-studio.jpg";
 
 const Index = () => {
-  const [currentStep, setCurrentStep] = useState<'upload' | 'commercial'>('upload');
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   const navigate = useNavigate();
   const { user, signOut, loading } = useAuth();
+  const { setUploadedFileIds, setStep } = useWorkflow();
+  const { toast } = useToast();
 
-  const handleFilesUploaded = (files: File[]) => {
-    setUploadedFiles(files);
-    setCurrentStep('commercial');
+  const handleFilesUploaded = async (files: File[]) => {
+    setIsUploading(true);
+    
+    try {
+      const fileIds: string[] = [];
+      
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch('/api/files', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Failed to upload ${file.name}`);
+        }
+        
+        const result = await response.json();
+        fileIds.push(result.fileId);
+      }
+      
+      setUploadedFileIds(fileIds);
+      setStep('remove-bg');
+      navigate('/workflow/remove-bg');
+    } catch (error) {
+      console.error('File upload error:', error);
+      toast({
+        title: "Upload Failed",
+        description: error instanceof Error ? error.message : "Failed to upload files. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   return (
@@ -78,29 +113,28 @@ const Index = () => {
       </header>
 
       {/* Hero Section */}
-      {currentStep === 'upload' && (
-        <section className="relative overflow-hidden">
-          <div className="absolute inset-0">
-            <img 
-              src={heroImage} 
-              alt="Professional photography studio" 
-              className="w-full h-full object-cover opacity-20"
-            />
-            <div className="absolute inset-0 bg-gradient-to-b from-background/80 via-background/60 to-background/90" />
-          </div>
-          
-          <div className="relative container mx-auto px-6 py-20 text-center">
-            <div className="max-w-4xl mx-auto">
-              <h2 className="text-5xl font-bold text-foreground mb-6">
-                Transform Your Product Photos Into
-                <span className="bg-gradient-electric bg-clip-text text-transparent"> Professional Images</span>
-              </h2>
-              <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
-                Remove backgrounds, position products on custom backdrops, and create professional composites in seconds. 
-                Perfect for resellers and e-commerce shops.
-              </p>
-              
-              <div className="flex items-center justify-center space-x-8 mb-12">
+      <section className="relative overflow-hidden">
+        <div className="absolute inset-0">
+          <img 
+            src={heroImage} 
+            alt="Professional photography studio" 
+            className="w-full h-full object-cover opacity-20"
+          />
+          <div className="absolute inset-0 bg-gradient-to-b from-background/80 via-background/60 to-background/90" />
+        </div>
+        
+        <div className="relative container mx-auto px-6 py-20 text-center">
+          <div className="max-w-4xl mx-auto">
+            <h2 className="text-5xl font-bold text-foreground mb-6">
+              Transform Your Product Photos Into
+              <span className="bg-gradient-electric bg-clip-text text-transparent"> Professional Images</span>
+            </h2>
+            <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
+              Remove backgrounds, position products on custom backdrops, and create professional composites in seconds. 
+              Perfect for resellers and e-commerce shops.
+            </p>
+            
+            <div className="flex items-center justify-center space-x-8 mb-12">
               <div className="flex items-center space-x-2 text-muted-foreground">
                 <Upload className="w-5 h-5 text-electric" />
                 <span>Batch Upload</span>
@@ -113,23 +147,20 @@ const Index = () => {
                 <Sparkles className="w-5 h-5 text-electric" />
                 <span>Custom Backdrops</span>
               </div>
-              </div>
             </div>
           </div>
-        </section>
-      )}
+        </div>
+      </section>
 
       {/* Main Content */}
       <main className="container mx-auto px-6 py-8">
-        {currentStep === 'upload' && (
+        {isUploading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-electric" />
+            <span className="ml-3 text-lg text-muted-foreground">Uploading files...</span>
+          </div>
+        ) : (
           <UploadZone onFilesUploaded={handleFilesUploaded} />
-        )}
-
-        {currentStep === 'commercial' && uploadedFiles.length > 0 && (
-          <CommercialEditingWorkflow
-            files={uploadedFiles}
-            onBack={() => setCurrentStep('upload')}
-          />
         )}
       </main>
 

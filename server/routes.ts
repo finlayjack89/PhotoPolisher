@@ -2,7 +2,8 @@
 import express, { type Request, type Response } from "express";
 import multer from "multer";
 import type { IStorage } from "./storage";
-import { insertUserQuotaSchema, insertProcessingCacheSchema, insertBackdropLibrarySchema, insertBatchImageSchema, imageJobs } from "@shared/schema";
+import { insertUserQuotaSchema, insertProcessingCacheSchema, insertBackdropLibrarySchema, insertBatchImageSchema, insertProjectBatchSchema, imageJobs } from "@shared/schema";
+import { z } from "zod";
 import { getDb } from "./db";
 import { processJob } from "./image-processing/process-job";
 import { eq, and } from "drizzle-orm";
@@ -276,6 +277,79 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
     }
   });
 
+  // Project Batches
+  app.post("/api/batches", express.json(), async (req: Request, res: Response) => {
+    try {
+      const validated = insertProjectBatchSchema.parse(req.body);
+      const batch = await storage.createBatch(validated);
+      res.json(batch);
+    } catch (error) {
+      console.error("Error creating batch:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid batch data", details: error.errors });
+      }
+      res.status(400).json({ error: "Invalid batch data" });
+    }
+  });
+
+  app.get("/api/batches/:id", async (req: Request, res: Response) => {
+    try {
+      const batch = await storage.getBatch(req.params.id);
+      if (!batch) {
+        return res.status(404).json({ error: "Batch not found" });
+      }
+      res.json(batch);
+    } catch (error) {
+      console.error("Error fetching batch:", error);
+      res.status(500).json({ error: "Failed to fetch batch" });
+    }
+  });
+
+  app.get("/api/batches", async (req: Request, res: Response) => {
+    try {
+      const userId = req.query.userId as string;
+      if (!userId) {
+        return res.status(400).json({ error: "userId query parameter required" });
+      }
+      const batches = await storage.getBatchesByUser(userId);
+      res.json(batches);
+    } catch (error) {
+      console.error("Error fetching batches:", error);
+      res.status(500).json({ error: "Failed to fetch batches" });
+    }
+  });
+
+  app.patch("/api/batches/:id", express.json(), async (req: Request, res: Response) => {
+    try {
+      const updates = req.body;
+      const batch = await storage.updateBatch(req.params.id, updates);
+      if (!batch) {
+        return res.status(404).json({ error: "Batch not found" });
+      }
+      res.json(batch);
+    } catch (error) {
+      console.error("Error updating batch:", error);
+      res.status(500).json({ error: "Failed to update batch" });
+    }
+  });
+
+  app.delete("/api/batches/:id", express.json(), async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: "userId required" });
+      }
+      const success = await storage.deleteBatch(req.params.id, userId);
+      if (!success) {
+        return res.status(404).json({ error: "Batch not found or unauthorized" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting batch:", error);
+      res.status(500).json({ error: "Failed to delete batch" });
+    }
+  });
+
   // Image Processing Routes
 
   app.post("/api/remove-backgrounds", async (req: Request, res: Response) => {
@@ -285,6 +359,76 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
       res.json(result);
     } catch (error) {
       console.error("Error in remove-backgrounds:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Background removal failed" });
+    }
+  });
+
+  app.post("/api/remove-background", express.json(), async (req: Request, res: Response) => {
+    try {
+      const requestSchema = z.object({
+        fileIds: z.array(z.string()).min(1, "At least one file ID required"),
+      });
+      
+      const { fileIds } = requestSchema.parse(req.body);
+      const { removeBackgrounds } = await import("./image-processing/remove-backgrounds");
+      
+      const subjects = [];
+      
+      for (const fileId of fileIds) {
+        const fileData = await storage.getFile(fileId);
+        
+        if (!fileData) {
+          subjects.push({
+            originalFileId: fileId,
+            error: "File not found",
+          });
+          continue;
+        }
+        
+        const base64Data = `data:${fileData.file.mimeType};base64,${fileData.buffer.toString('base64')}`;
+        
+        const result = await removeBackgrounds({
+          images: [{
+            data: base64Data,
+            name: fileData.file.originalFilename || 'image',
+          }],
+        });
+        
+        if (result.success && result.images.length > 0) {
+          const processed = result.images[0];
+          
+          if (processed.error) {
+            subjects.push({
+              originalFileId: fileId,
+              error: processed.error,
+            });
+          } else {
+            const processedBuffer = Buffer.from(processed.transparentData.split(',')[1], 'base64');
+            const timestamp = Date.now();
+            const storageKey = `processed/${timestamp}-${processed.name}`;
+            
+            const processedFile = await storage.createFile({
+              storageKey,
+              mimeType: 'image/png',
+              bytes: processedBuffer.length,
+              originalFilename: processed.name,
+            }, processedBuffer);
+            
+            subjects.push({
+              originalFileId: fileId,
+              processedFileId: processedFile.id,
+              processedUrl: `/api/files/${processedFile.id}`,
+            });
+          }
+        }
+      }
+      
+      res.json({ subjects });
+    } catch (error) {
+      console.error("Error in remove-background:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
       res.status(500).json({ error: error instanceof Error ? error.message : "Background removal failed" });
     }
   });
