@@ -311,6 +311,36 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
     }
   });
 
+  app.post("/api/analyze-backdrop", (req: Request, res: Response) => {
+    upload.single("image")(req, res, async (err) => {
+      if (err) {
+        console.error("Multer error in analyze-backdrop:", err);
+        return res.status(400).json({ error: "File upload failed for backdrop analysis" });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: "No image file provided for backdrop analysis" });
+      }
+
+      try {
+        const { analyzeBackdrop } = await import("./image-processing/analyze-images");
+        
+        // Convert buffer to base64 (without data URL prefix)
+        const base64Data = req.file.buffer.toString('base64');
+        
+        const result = await analyzeBackdrop({
+          imageData: base64Data,
+          mimeType: req.file.mimetype,
+        });
+        
+        res.json(result);
+      } catch (error) {
+        console.error("Error in analyze-backdrop:", error);
+        res.status(500).json({ error: error instanceof Error ? error.message : "Backdrop analysis failed" });
+      }
+    });
+  });
+
   app.post("/api/add-drop-shadow", async (req: Request, res: Response) => {
     try {
       const { addDropShadow } = await import("./image-processing/add-drop-shadow");

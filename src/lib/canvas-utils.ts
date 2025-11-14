@@ -1,7 +1,11 @@
 // src/lib/canvas-utils.ts
 import { loadImage } from './image-resize-utils';
 
-export type SubjectPlacement = 'bottom-center' | 'bottom-left' | 'bottom-right' | 'middle-center';
+export interface SubjectPlacement {
+  x: number; // Horizontal position (0-1, where 0.5 is center)
+  y: number; // Vertical position (0-1, where 0 is top, 1 is bottom)
+  scale: number; // Scale factor for the subject
+}
 
 // This is the main layer, which is the *shadowed* subject
 export interface CompositeLayer {
@@ -82,36 +86,16 @@ export async function compositeLayers(
       loadImage(cleanSubjectUrl),      // Clean
     ]);
 
-    // 3. Calculate Final Positioning
-    const padding = (outputWidth * paddingPercent) / 100;
+    // 3. Calculate Final Positioning based on normalized coordinates
     const { width: subjectW, height: subjectH } = subjectLayer;
 
-    let finalX: number, finalY: number;
-
-    switch (placement) {
-      case 'bottom-center':
-        finalX = (outputWidth - subjectW) / 2;
-        finalY = outputHeight - subjectH - padding;
-        break;
-      case 'bottom-left':
-        finalX = padding;
-        finalY = outputHeight - subjectH - padding;
-        break;
-      case 'bottom-right':
-        finalX = outputWidth - subjectW - padding;
-        finalY = outputHeight - subjectH - padding;
-        break;
-      case 'middle-center':
-        finalX = (outputWidth - subjectW) / 2;
-        finalY = (outputHeight - subjectH) / 2;
-        break;
-      default:
-        finalX = (outputWidth - subjectW) / 2;
-        finalY = outputHeight - subjectH - padding;
-    }
-
-    finalX = Math.round(finalX);
-    finalY = Math.round(finalY);
+    // X is centered (placement.x = 0.5 means center)
+    const finalX = Math.round((outputWidth * placement.x) - (subjectW / 2));
+    
+    // Y position: placement.y represents where the bottom of the subject should be
+    // 0 = top, 1 = bottom, 0.75 = 75% down (typical floor position)
+    const finalY = Math.round((outputHeight * placement.y) - subjectH);
+    
     const finalReflectionY = Math.round(finalY + subjectH);
 
 

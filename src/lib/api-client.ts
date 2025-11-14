@@ -125,6 +125,25 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(data),
   }),
+
+  /**
+   * Analyze backdrop image to detect floor position using AI
+   * @param formData FormData containing the backdrop image
+   * @returns Object with floorY coordinate (0-1, where 0 is top, 1 is bottom)
+   */
+  analyzeBackdrop: async (formData: FormData): Promise<{ floorY: number }> => {
+    const response = await fetch('/api/analyze-backdrop', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Backdrop analysis failed' }));
+      throw new Error(error.error || `Backdrop analysis failed: ${response.status}`);
+    }
+
+    return response.json();
+  },
 };
 
 /**

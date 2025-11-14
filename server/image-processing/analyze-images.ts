@@ -338,7 +338,7 @@ export async function analyzeBackdrop(req: AnalyzeBackdropRequest) {
           }],
           generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: 200,
+            maxOutputTokens: 1000,
             responseMimeType: 'application/json'
           }
         })
