@@ -234,11 +234,18 @@ export class MemStorage implements IStorage {
     };
     
     this.files.set(id, { file: newFile, buffer });
+    console.log(`[MemStorage] File created: ${id} (${fileData.originalFilename}, ${fileData.bytes} bytes). Total files in storage: ${this.files.size}`);
     return newFile;
   }
 
   async getFile(fileId: string): Promise<{ file: File; buffer: Buffer } | null> {
-    return this.files.get(fileId) || null;
+    const result = this.files.get(fileId) || null;
+    if (result) {
+      console.log(`[MemStorage] File retrieved: ${fileId} (${result.file.originalFilename})`);
+    } else {
+      console.warn(`[MemStorage] File NOT found: ${fileId}. Available files: ${Array.from(this.files.keys()).join(', ')}`);
+    }
+    return result;
   }
 
   async getFileByStorageKey(storageKey: string): Promise<{ file: File; buffer: Buffer } | null> {

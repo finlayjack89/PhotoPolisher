@@ -1,4 +1,7 @@
 // src/lib/api-client.ts
+import { QueryClient } from '@tanstack/react-query';
+
+export const queryClient = new QueryClient();
 
 /**
  * Generic API request helper
@@ -249,5 +252,58 @@ export async function uploadBackdrop(formData: FormData): Promise<any> {
 export async function getBackdrops(userId: string): Promise<any[]> {
   return apiRequest(`/api/backdrops/${userId}`, {
     method: 'GET',
+  });
+}
+
+/**
+ * Remove background from images using file IDs
+ * @param fileIds Array of file IDs to process
+ * @returns Object containing processed subjects
+ */
+export async function removeBackgroundWithFileIds(fileIds: string[]): Promise<{
+  subjects: Array<{
+    originalFileId: string;
+    processedFileId?: string;
+    processedUrl?: string;
+    error?: string;
+  }>;
+}> {
+  return apiRequest('/api/remove-background', {
+    method: 'POST',
+    body: JSON.stringify({ fileIds }),
+  });
+}
+
+/**
+ * Create a new project batch
+ * @param batchData The batch configuration
+ * @returns The created batch object
+ */
+export async function createBatch(batchData: {
+  userId: string;
+  backdropFileId?: string | null;
+  aspectRatio: string;
+  positioning?: any;
+  shadowConfig?: any;
+  reflectionConfig?: any;
+  totalImages?: number;
+  status?: string;
+}): Promise<any> {
+  return apiRequest('/api/batches', {
+    method: 'POST',
+    body: JSON.stringify(batchData),
+  });
+}
+
+/**
+ * Update an existing batch
+ * @param id The batch ID
+ * @param updates Partial batch data to update
+ * @returns The updated batch object
+ */
+export async function updateBatch(id: string, updates: any): Promise<any> {
+  return apiRequest(`/api/batches/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
   });
 }
