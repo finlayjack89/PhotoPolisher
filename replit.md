@@ -18,8 +18,8 @@ Preferred communication style: Simple, everyday language.
 - **Server**: Express.js with TypeScript, Vite HMR middleware, CORS, 50MB payload limit.
 - **Storage**: `MemStorage` class implementing `IStorage` interface, designed for future database integration with an opaque file ID system.
 - **API Design**: RESTful endpoints for quotas, caching, backdrops, batches, and various AI/image processing operations.
-- **Database**: PostgreSQL with Drizzle ORM, including tables for user quotas, processing cache, system health, backdrop library, and batch images.
-- **Job Queue**: Asynchronous processing for image operations.
+- **Database**: PostgreSQL with Drizzle ORM, including tables for user quotas, processing cache, system health, backdrop library, batch images, and background removal jobs.
+- **Job Queue**: Asynchronous processing for background removal with parallel worker (concurrency=3), database-backed job tracking, and polling-based frontend integration to prevent event loop blocking.
 
 ### Key Architectural Decisions
 - **Client-Side Image Processing**: Minimizes server load and API costs by utilizing the browser's Canvas API.
@@ -29,6 +29,7 @@ Preferred communication style: Simple, everyday language.
 - **Type Safety**: Achieved through TypeScript, Zod, and Drizzle for robust code.
 - **Opaque File IDs**: UUID-based IDs abstract storage details, enabling cloud migration and eliminating legacy file path issues.
 - **Comprehensive API Hardening**: Includes timeout control, exponential backoff, and defensive parsing for all external API integrations to ensure reliability.
+- **Async Job Queue for Background Removal**: Prevents Node.js event loop blocking that caused WebSocket disconnections. Uses immediate 202 response, parallel worker processing (concurrency=3), file URLs instead of base64, and frontend polling every 2 seconds.
 
 ## External Dependencies
 
