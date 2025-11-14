@@ -54,6 +54,30 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### November 14, 2025 - Critical Bug Fix: Infinite Render Loop Resolved
+
+**Problem**: WorkflowPage experienced infinite render loop causing 1372+ "Maximum update depth exceeded" errors in browser console, making the application unusable.
+
+**Root Cause**: WorkflowContext recreated all setter functions (setStep, setUploadedFileIds, etc.) on every render. WorkflowPage's useEffect depended on these setters, causing them to retrigger infinitely when the setter reference changed.
+
+**Solution**: Wrapped all 12 context functions in `useCallback` with stable references:
+
+**Fixed Functions:**
+- **8 Setters**: setStep, setUploadedFileIds, setProcessedSubjects, setSelectedBackdropId, setPositioning, setShadowConfig, setReflectionConfig, setBatchId
+- **4 Utilities**: resetWorkflow, addUploadedFile, getUploadedFile, getAllUploadedFiles
+- **Context Value**: Wrapped entire contextValue object in useMemo with proper dependencies
+
+**Verification:**
+- ✅ Browser console completely clean (only normal React Router warnings)
+- ✅ Server running without errors
+- ✅ Application loads and renders correctly
+- ✅ No "Maximum update depth exceeded" errors
+- ✅ Architect-approved as production-ready
+
+**Effect**: WorkflowPage useEffect now only runs when actual dependencies change (not on every render), eliminating the infinite loop and restoring application functionality.
+
+---
+
 ### November 13, 2025 - Opaque File ID Migration Complete
 
 **Problem**: Recurring 404 errors from inconsistent file path handling. Legacy system stored physical paths causing URL encoding issues, filesystem coupling, and cloud migration barriers.
