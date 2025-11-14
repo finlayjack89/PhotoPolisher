@@ -20,10 +20,10 @@ const WorkflowPage = () => {
   const { toast } = useToast();
 
   useEffect(() => {
-    if (step && ['upload', 'remove-bg', 'position', 'finalize'].includes(step)) {
+    if (step && state.step !== step && ['upload', 'remove-bg', 'position', 'finalize'].includes(step)) {
       setStep(step as WorkflowStep);
     }
-  }, [step, setStep]);
+  }, [step, state.step, setStep]);
 
   const removeBackgroundMutation = useMutation({
     mutationFn: removeBackgroundWithFileIds,

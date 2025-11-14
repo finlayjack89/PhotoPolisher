@@ -9,7 +9,6 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { Badge } from "@/components/ui/badge";
 import {
   Tabs,
   TabsContent,
@@ -21,15 +20,12 @@ import {
   Move,
   ArrowRight,
   AlertCircle,
-  Zap,
-  Library,
-  Loader2,
   ArrowLeft,
+  Loader2,
 } from "lucide-react";
 import { SubjectPlacement, getImageDimensions } from "@/lib/canvas-utils";
 import { useToast } from "@/hooks/use-toast";
 import { BackdropLibrary } from "@/components/BackdropLibrary";
-import { api } from "@/lib/api-client";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 
@@ -75,7 +71,6 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   
   const [previewCutout, setPreviewCutout] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(true);
-  const [isBackdropAnalyzing, setIsBackdropAnalyzing] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   // Master Rules State
@@ -84,7 +79,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   
   const [placement, setPlacement] = useState<SubjectPlacement>({
     x: 0.5, // X is always 50%
-    y: 0.75, // Default floor
+    y: 0.99504, // Bottom position (user can override)
     scale: 1.0, 
   });
 
@@ -94,7 +89,6 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
 
   const [subjectDimensions, setSubjectDimensions] = useState({ w: 1, h: 1 });
   const [backdropDimensions, setBackdropDimensions] = useState({ w: 1, h: 1 });
-  const [aiFloorY, setAiFloorY] = useState<number | null>(null);
 
   // This effect fetches the preview cutout
   useEffect(() => {
@@ -141,43 +135,24 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     }
   }, [backdrop]);
   
-  const analyzeAndSetBackdrop = async (file: File, fileUrl: string, source: 'upload' | 'library') => {
+  const setBackdropImage = async (file: File, fileUrl: string, source: 'upload' | 'library') => {
     setBackdrop(fileUrl);
     setBackdropFile(file);
-    setIsBackdropAnalyzing(true);
-    setAiFloorY(null);
     
-    try {
-      const formData = new FormData();
-      formData.append('image', file);
-      const { floorY } = await api.analyzeBackdrop(formData);
-      
-      setAiFloorY(floorY);
-      setPlacement(prev => ({ ...prev, y: floorY })); // AI Snap
-      toast({
-        title: source === 'upload' ? "AI Floor Detection" : "Backdrop Selected",
-        description: `Floor snapped to ${Math.round(floorY * 100)}%`,
-      });
-
-    } catch (error) {
-      console.error('Error analyzing backdrop:', error);
-      toast({
-        title: "AI Analysis Failed",
-        description: "Defaulting to 75%. You can position it manually.",
-        variant: "destructive"
-      });
-      setAiFloorY(0.75);
-      setPlacement(prev => ({ ...prev, y: 0.75 })); // Default Snap
-    } finally {
-      setIsBackdropAnalyzing(false);
-    }
+    // Set default positioning (user can manually adjust)
+    setPlacement(prev => ({ ...prev, y: 0.99504 }));
+    
+    toast({
+      title: source === 'upload' ? "Backdrop Uploaded" : "Backdrop Selected",
+      description: "Subject positioned at bottom. Adjust manually if needed.",
+    });
   };
 
   const handleBackdropUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       const dataUrl = await fileToDataUrl(file);
-      await analyzeAndSetBackdrop(file, dataUrl, 'upload');
+      await setBackdropImage(file, dataUrl, 'upload');
     }
   };
 
@@ -187,7 +162,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
       const response = await fetch(imageUrl);
       const blob = await response.blob();
       const file = new File([blob], backdrop.name, { type: blob.type });
-      await analyzeAndSetBackdrop(file, imageUrl, 'library');
+      await setBackdropImage(file, imageUrl, 'library');
     } catch (error) {
        console.error('Error selecting library backdrop:', error);
        toast({ title: "Error loading library file", variant: "destructive" });
@@ -282,19 +257,12 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                   
                   <TabsContent value="upload" className="mt-4">
                     <div 
-                      className={cn(
-                        "border-2 border-dashed border-muted-foreground/25 rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors",
-                        isBackdropAnalyzing && "opacity-50 pointer-events-none"
-                      )}
+                      className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors"
                       onClick={() => fileInputRef.current?.click()}
                     >
-                      {isBackdropAnalyzing ? (
-                         <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin text-primary" />
-                      ) : (
-                         <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                      )}
+                      <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
                       <p className="text-sm text-muted-foreground">
-                        {isBackdropAnalyzing ? "Analyzing backdrop..." : (backdrop ? (backdropFile ? backdropFile.name : "Library Backdrop Selected") : "Click to upload backdrop")}
+                        {backdrop ? (backdropFile ? backdropFile.name : "Library Backdrop Selected") : "Click to upload backdrop"}
                       </p>
                     </div>
                     <input
@@ -346,19 +314,6 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                 </div>
               </div>
 
-              {/* AI Floor Detection */}
-              <div className="flex items-center space-x-2">
-                <Zap className="h-4 w-4 text-primary" />
-                <Label>AI Floor Detection Active</Label>
-                {isBackdropAnalyzing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Badge variant={aiFloorY ? "default" : "secondary"}>
-                    {aiFloorY ? `${Math.round(aiFloorY * 100)}%` : "N/A"}
-                  </Badge>
-                )}
-              </div>
-
               {/* Batch Info */}
               <Card>
                 <CardHeader className="pb-3">
@@ -388,12 +343,6 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                   <div className="flex justify-between">
                     <span>Aspect Ratio:</span>
                     <span className="capitalize">{masterAspectRatio}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>AI Floor Detection:</span>
-                    <span className={cn(isBackdropAnalyzing ? 'text-yellow-600' : (aiFloorY ? 'text-green-600' : 'text-muted-foreground'))}>
-                      {isBackdropAnalyzing ? "..." : (aiFloorY ? `✓ Active (${Math.round(aiFloorY * 100)}%)` : "N/A")}
-                    </span>
                   </div>
                 </CardContent>
               </Card>
