@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useRef, useMemo } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode, useRef, useMemo, useCallback } from 'react';
 
 interface WorkflowState {
   step: 'upload' | 'remove-bg' | 'position' | 'finalize';
@@ -92,55 +92,55 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     }
   }, [state]);
 
-  const setStep = (step: WorkflowState['step']) => {
+  const setStep = useCallback((step: WorkflowState['step']) => {
     setState((prev) => ({ ...prev, step }));
-  };
+  }, []);
 
-  const setUploadedFileIds = (fileIds: string[]) => {
+  const setUploadedFileIds = useCallback((fileIds: string[]) => {
     setState((prev) => ({ ...prev, uploadedFileIds: fileIds }));
-  };
+  }, []);
 
-  const setProcessedSubjects = (subjects: WorkflowState['processedSubjects']) => {
+  const setProcessedSubjects = useCallback((subjects: WorkflowState['processedSubjects']) => {
     setState((prev) => ({ ...prev, processedSubjects: subjects }));
-  };
+  }, []);
 
-  const setSelectedBackdropId = (id: string | null) => {
+  const setSelectedBackdropId = useCallback((id: string | null) => {
     setState((prev) => ({ ...prev, selectedBackdropId: id }));
-  };
+  }, []);
 
-  const setPositioning = (positioning: WorkflowState['positioning']) => {
+  const setPositioning = useCallback((positioning: WorkflowState['positioning']) => {
     setState((prev) => ({ ...prev, positioning }));
-  };
+  }, []);
 
-  const setShadowConfig = (config: any) => {
+  const setShadowConfig = useCallback((config: any) => {
     setState((prev) => ({ ...prev, shadowConfig: config }));
-  };
+  }, []);
 
-  const setReflectionConfig = (config: any) => {
+  const setReflectionConfig = useCallback((config: any) => {
     setState((prev) => ({ ...prev, reflectionConfig: config }));
-  };
+  }, []);
 
-  const setBatchId = (id: string | null) => {
+  const setBatchId = useCallback((id: string | null) => {
     setState((prev) => ({ ...prev, batchId: id }));
-  };
+  }, []);
 
-  const resetWorkflow = () => {
+  const resetWorkflow = useCallback(() => {
     setState(initialState);
     localStorage.removeItem(STORAGE_KEY);
     uploadedFilesRef.current.clear();
-  };
+  }, []);
 
-  const addUploadedFile = (fileId: string, file: File) => {
+  const addUploadedFile = useCallback((fileId: string, file: File) => {
     uploadedFilesRef.current.set(fileId, file);
-  };
+  }, []);
 
-  const getUploadedFile = (fileId: string): File | null => {
+  const getUploadedFile = useCallback((fileId: string): File | null => {
     return uploadedFilesRef.current.get(fileId) || null;
-  };
+  }, []);
 
-  const getAllUploadedFiles = (): File[] => {
+  const getAllUploadedFiles = useCallback((): File[] => {
     return Array.from(uploadedFilesRef.current.values());
-  };
+  }, []);
 
   // Memoize files and hasMissingFiles for stable references
   // This prevents infinite render loops in consuming components
@@ -152,7 +152,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     return state.uploadedFileIds.length > 0 && files.length === 0;
   }, [state.uploadedFileIds.length, files.length]);
 
-  const contextValue: WorkflowContextType = {
+  const contextValue: WorkflowContextType = useMemo(() => ({
     state,
     files,
     hasMissingFiles,
@@ -168,7 +168,23 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     addUploadedFile,
     getUploadedFile,
     getAllUploadedFiles,
-  };
+  }), [
+    state,
+    files,
+    hasMissingFiles,
+    setStep,
+    setUploadedFileIds,
+    setProcessedSubjects,
+    setSelectedBackdropId,
+    setPositioning,
+    setShadowConfig,
+    setReflectionConfig,
+    setBatchId,
+    resetWorkflow,
+    addUploadedFile,
+    getUploadedFile,
+    getAllUploadedFiles,
+  ]);
 
   return (
     <WorkflowContext.Provider value={contextValue}>
