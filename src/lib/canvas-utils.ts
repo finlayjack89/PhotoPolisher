@@ -123,18 +123,40 @@ export async function compositeLayers(
 
     // 5. Draw Reflection (IF ENABLED) - positioned to match actual product
     if (reflectionOptions && reflectionOptions.opacity > 0) {
-      // Create a temporary canvas for the reflection to avoid destroying the backdrop
+      // Calculate the scale factor between clean and displayed subject
+      // The displayed subject dimensions include shadow padding
+      // We need to find the actual product size within the shadowed image
+      
+      // Estimate the actual product size within the shadowed image
+      // Cloudinary's drop shadow typically adds 1.5x-2x padding
+      // The product is centered within this padded area
+      const estimatedProductWidth = subjectW / 1.5;  // Approximate product width
+      const estimatedProductHeight = subjectH / 1.5; // Approximate product height
+      
+      // Calculate scale factors
+      const scaleX = estimatedProductWidth / cleanW;
+      const scaleY = estimatedProductHeight / cleanH;
+      
+      // Use the smaller scale to maintain aspect ratio
+      const scale = Math.min(scaleX, scaleY);
+      
+      // Calculate scaled dimensions for the reflection
+      const scaledReflectionW = cleanW * scale;
+      const scaledReflectionH = cleanH * scale;
+      
+      // Create a temporary canvas for the reflection at scaled size
       const reflectionCanvas = document.createElement('canvas');
-      reflectionCanvas.width = cleanW;
-      reflectionCanvas.height = cleanH;
+      reflectionCanvas.width = scaledReflectionW;
+      reflectionCanvas.height = scaledReflectionH;
       const reflectionCtx = reflectionCanvas.getContext('2d');
       
       if (reflectionCtx) {
-        // Draw the flipped clean subject on the temporary canvas
+        // Draw the flipped and scaled clean subject on the temporary canvas
         reflectionCtx.save();
-        reflectionCtx.translate(0, cleanH);
+        reflectionCtx.translate(0, scaledReflectionH);
         reflectionCtx.scale(1, -1);
-        reflectionCtx.drawImage(cleanSubjectImg, 0, 0, cleanW, cleanH);
+        // Draw clean subject scaled to match displayed product size
+        reflectionCtx.drawImage(cleanSubjectImg, 0, 0, scaledReflectionW, scaledReflectionH);
         reflectionCtx.restore();
         
         // Apply gradient fade on the temporary canvas
@@ -142,7 +164,7 @@ export async function compositeLayers(
           0,
           0,  // Start at top of reflection
           0,
-          cleanH * reflectionOptions.falloff  // End at falloff point
+          scaledReflectionH * reflectionOptions.falloff  // End at falloff point
         );
         
         gradient.addColorStop(0, `rgba(255, 255, 255, ${reflectionOptions.opacity})`);
@@ -150,20 +172,24 @@ export async function compositeLayers(
         
         reflectionCtx.globalCompositeOperation = 'destination-out';
         reflectionCtx.fillStyle = gradient;
-        reflectionCtx.fillRect(0, 0, cleanW, cleanH);
+        reflectionCtx.fillRect(0, 0, scaledReflectionW, scaledReflectionH);
         
         // Calculate where reflection should be drawn
-        const reflectionY = actualProductY + cleanH;
+        // Center the reflection under the product
+        const reflectionX = finalX + (subjectW - scaledReflectionW) / 2;
+        const reflectionY = finalY + subjectH;
         
         console.log('🪞 [Reflection] Drawing at:', {
-          x: actualProductX,
+          x: reflectionX,
           y: reflectionY,
-          dimensions: { width: cleanW, height: cleanH }
+          originalDimensions: { width: cleanW, height: cleanH },
+          scaledDimensions: { width: scaledReflectionW, height: scaledReflectionH },
+          scale: scale
         });
         
         // Draw the reflection from temporary canvas onto main canvas
         ctx.globalAlpha = reflectionOptions.opacity;
-        ctx.drawImage(reflectionCanvas, actualProductX, reflectionY, cleanW, cleanH);
+        ctx.drawImage(reflectionCanvas, reflectionX, reflectionY);
         ctx.globalAlpha = 1.0;
       }
     }
