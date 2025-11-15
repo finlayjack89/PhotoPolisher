@@ -78,19 +78,23 @@ export function computeCompositeLayout(
   placement: SubjectPlacement
 ): CompositeLayout {
   /**
-   * ARCHITECTURE:
-   * - The shadow asset (from Cloudinary with c_lpad) is our "content"
-   * - The shadow asset should occupy (1 - 2*p) of the final canvas
-   * - This matches how the preview works: subject width = (1 - 2*p) * 100%
+   * ARCHITECTURE - Matches CSS Preview Behavior:
+   * 
+   * CSS Preview does:
+   *   - Container sets the aspect ratio
+   *   - Subject WIDTH = (1 - 2*p) * containerWidth
+   *   - Subject HEIGHT = auto (maintains natural aspect ratio)
+   * 
+   * Canvas must do:
+   *   - Canvas width determined by shadow width and padding
+   *   - Canvas height determined by width and aspect ratio
+   *   - Shadow scales to fit (1-2p) of canvas WIDTH
+   *   - Shadow height is whatever it naturally is at this scale
+   *   - Letterboxing (empty space) if shadow doesn't fill canvas height
    */
   const p = paddingPercent / 100;
 
-  // 1. Calculate canvas size where shadow occupies (1-2p) of the space
-  // If padding is 20%, shadow occupies 60% of canvas
-  const baseCanvasW = subjectShadowW / (1 - 2 * p);
-  const baseCanvasH = subjectShadowH / (1 - 2 * p);
-
-  // 2. Determine target aspect ratio
+  // 1. Determine target aspect ratio
   let targetRatio: number;
   if (aspectRatio === '1:1') targetRatio = 1;
   else if (aspectRatio === '4:3') targetRatio = 4 / 3;
@@ -98,25 +102,35 @@ export function computeCompositeLayout(
   else if (aspectRatio === 'original' && numericAspectRatio) {
     targetRatio = numericAspectRatio;
   } else {
-    // Fallback to base canvas dimensions
-    targetRatio = baseCanvasW / baseCanvasH;
+    // Fallback to shadow dimensions
+    targetRatio = subjectShadowW / subjectShadowH;
   }
 
-  // 3. Calculate final canvas size enforcing aspect ratio
-  let canvasW: number, canvasH: number;
-  if (baseCanvasW / baseCanvasH >= targetRatio) {
-    canvasW = baseCanvasW;
-    canvasH = canvasW / targetRatio;
-  } else {
-    canvasH = baseCanvasH;
-    canvasW = canvasH * targetRatio;
-  }
+  // 2. Calculate canvas dimensions (WIDTH-BASED like CSS preview)
+  // Canvas width is sized so shadow occupies (1-2p) of it
+  const canvasW = subjectShadowW / (1 - 2 * p);
+  // Canvas height comes from aspect ratio
+  const canvasH = canvasW / targetRatio;
 
-  // 4. Calculate scale factor
-  // Shadow should occupy (1-2p) of the canvas
+  // 3. Calculate scale factor
+  // Start with width-based scale (primary constraint, like CSS preview)
+  // This ensures shadow occupies (1-2p) of canvas WIDTH
   const scaleW = ((1 - 2 * p) * canvasW) / subjectShadowW;
-  const scaleH = ((1 - 2 * p) * canvasH) / subjectShadowH;
-  const scale = Math.min(scaleW, scaleH);
+  
+  // Calculate what height would be at this scale
+  const scaledHeight = subjectShadowH * scaleW;
+  
+  // If the scaled height would CLIP (exceed full canvas), reduce scale to fit
+  // Note: We check against FULL canvas height, not (1-2p)*canvasH
+  // This allows letterboxing but prevents actual overflow
+  let scale: number;
+  if (scaledHeight > canvasH) {
+    // Tall asset - scale to fit full canvas height instead
+    scale = canvasH / subjectShadowH;
+  } else {
+    // Normal case - use width-based scale
+    scale = scaleW;
+  }
 
   // 5. Calculate shadowed subject drawing dimensions and position
   const drawWidth = subjectShadowW * scale;
@@ -148,10 +162,10 @@ export function computeCompositeLayout(
       placement
     },
     calculated: {
-      baseCanvasSize: { w: baseCanvasW, h: baseCanvasH },
       targetRatio,
       canvas: { w: canvasW, h: canvasH },
-      scale
+      scale,
+      widthBased: true
     },
     output: {
       shadowedSubject: { x: subjectX, y: subjectY, w: drawWidth, h: drawHeight },
