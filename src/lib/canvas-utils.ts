@@ -86,53 +86,81 @@ export async function compositeLayers(
       loadImage(cleanSubjectUrl),      // Clean
     ]);
 
-    // 3. Calculate Final Positioning based on normalized coordinates
-    const { width: subjectW, height: subjectH } = subjectLayer;
+    // 3. Get dimensions for both images
+    const subjectW = subjectLayer.width;   // Shadowed dimensions (includes padding from drop shadow)
+    const subjectH = subjectLayer.height;
+    const cleanW = cleanSubjectImg.naturalWidth;   // Clean dimensions (actual product size)
+    const cleanH = cleanSubjectImg.naturalHeight;
 
-    // X is centered (placement.x = 0.5 means center)
+    console.log('🎨 [Compositing] Dimensions:', {
+      shadowed: { width: subjectW, height: subjectH },
+      clean: { width: cleanW, height: cleanH },
+      output: { width: outputWidth, height: outputHeight }
+    });
+
+    // 4. Calculate Final Positioning based on normalized coordinates
+    // Use SHADOWED dimensions for initial positioning (includes shadow padding)
     const finalX = Math.round((outputWidth * placement.x) - (subjectW / 2));
     
     // Y position: placement.y represents where the bottom of the subject should be
     // 0 = top, 1 = bottom, 0.75 = 75% down (typical floor position)
     const finalY = Math.round((outputHeight * placement.y) - subjectH);
-    
-    const finalReflectionY = Math.round(finalY + subjectH);
 
+    // Calculate where the ACTUAL PRODUCT appears within the shadowed image
+    // Cloudinary uses c_lpad which centers the product within the padded canvas
+    const productOffsetX = (subjectW - cleanW) / 2;
+    const productOffsetY = (subjectH - cleanH) / 2;
 
-    // 4. Draw Reflection (IF ENABLED)
+    // Actual product position in the output canvas
+    const actualProductX = Math.round(finalX + productOffsetX);
+    const actualProductY = Math.round(finalY + productOffsetY);
+
+    console.log('📍 [Compositing] Positions:', {
+      shadowedImage: { x: finalX, y: finalY },
+      productOffset: { x: productOffsetX, y: productOffsetY },
+      actualProduct: { x: actualProductX, y: actualProductY }
+    });
+
+    // 5. Draw Reflection (IF ENABLED) - positioned to match actual product
     if (reflectionOptions && reflectionOptions.opacity > 0) {
       ctx.save();
 
-      // Position the reflection
-      ctx.translate(finalX, finalReflectionY);
+      const reflectionY = actualProductY + cleanH;
+
+      console.log('🪞 [Reflection] Drawing at:', {
+        x: actualProductX,
+        y: reflectionY,
+        dimensions: { width: cleanW, height: cleanH }
+      });
+
+      // Position the reflection directly below the actual product
+      ctx.translate(actualProductX, reflectionY);
       ctx.scale(1, -1); // Flip vertically
 
-      // Draw the CLEAN subject image flipped
-      ctx.drawImage(cleanSubjectImg, 0, 0, subjectW, subjectH);
+      // Draw the CLEAN subject image at its NATURAL size (no scaling)
+      // This ensures reflection matches the visible product exactly
+      ctx.drawImage(cleanSubjectImg, 0, 0, cleanW, cleanH);
 
-      // Create fade-out gradient
+      // Create fade-out gradient using clean dimensions
       const gradient = ctx.createLinearGradient(
         0,
         0,
         0,
-        subjectH * reflectionOptions.falloff,
+        cleanH * reflectionOptions.falloff,
       );
 
       const startOpacity = reflectionOptions.opacity;
-      // This gradient masks the image, fading it to transparency.
-      // destination-in means "keep where new shape is".
-      // We draw a gradient that goes from semi-transparent to fully transparent.
       gradient.addColorStop(0, `rgba(0, 0, 0, ${startOpacity})`);
       gradient.addColorStop(1, `rgba(0, 0, 0, 0)`);
 
       ctx.globalCompositeOperation = 'destination-in';
       ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, subjectW, subjectH);
+      ctx.fillRect(0, 0, cleanW, cleanH);
 
       ctx.restore();
     }
 
-    // 5. Draw Main Subject (on top of backdrop and reflection)
+    // 6. Draw Main Subject (on top of backdrop and reflection)
     ctx.drawImage(subjectImg, finalX, finalY, subjectW, subjectH);
 
     // 6. Export canvas to blob

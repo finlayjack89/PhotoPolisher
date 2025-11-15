@@ -261,12 +261,13 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
     if (isCancelled.current) return;
     const finalResults: ProcessedImage[] = [];
 
-    for (const [index, job] of completedJobs.entries()) {
-      if (job.status !== 'completed' || !job.final_image_url) {
-        continue; // Skip failed jobs
-      }
+    // Filter to only successfully completed jobs
+    const successfulJobs = completedJobs.filter(j => j.status === 'completed' && j.final_image_url);
+    
+    console.log(`📦 [Batch] Starting compositing for ${successfulJobs.length} successful jobs (${completedJobs.length} total)`);
 
-      setCurrentStep(`Compositing ${index + 1} / ${completedJobs.length}: ${job.name}`);
+    for (const [index, job] of successfulJobs.entries()) {
+      setCurrentStep(`Compositing ${index + 1} / ${successfulJobs.length}: ${job.name}`);
 
       try {
         // --- Step 3: Calculate Crop ---
