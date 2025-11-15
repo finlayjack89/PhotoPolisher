@@ -11,7 +11,7 @@ export async function setupVite(app: express.Application) {
 
   if (isProduction) {
     // Production mode: serve pre-built static files
-    const distPath = path.resolve(__dirname, "..", "..", "dist", "client");
+    const distPath = path.resolve(__dirname, "..", "dist");
     
     // Serve static assets from dist folder
     app.use(express.static(distPath));
