@@ -43,6 +43,52 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onFilesUploaded }) => {
     }
   };
 
+  // Convert ANY file format to PNG using canvas (preserves orientation correction)
+  const convertToPngViaCanvas = async (file: File): Promise<File> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const reader = new FileReader();
+      
+      reader.onload = (e) => {
+        img.src = e.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          
+          if (!ctx) {
+            reject(new Error('Failed to get canvas context'));
+            return;
+          }
+          
+          ctx.drawImage(img, 0, 0);
+          
+          canvas.toBlob((blob) => {
+            if (!blob) {
+              reject(new Error('Failed to convert to PNG blob'));
+              return;
+            }
+            
+            const pngFileName = file.name.replace(/\.[^/.]+$/, '.png');
+            const pngFile = new File([blob], pngFileName, {
+              type: 'image/png',
+              lastModified: Date.now(),
+            });
+            
+            console.log(`✅ Converted ${file.name} to PNG (${(blob.size / (1024 * 1024)).toFixed(2)}MB)`);
+            resolve(pngFile);
+          }, 'image/png');
+        };
+        
+        img.onerror = () => reject(new Error('Failed to load image for PNG conversion'));
+      };
+      
+      reader.onerror = () => reject(new Error('Failed to read file for PNG conversion'));
+      reader.readAsDataURL(file);
+    });
+  };
+
   const convertFileWithCloudConvert = async (file: File): Promise<File> => {
     try {
       console.log(`Converting ${file.name} using CloudConvert...`);
@@ -103,23 +149,22 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onFilesUploaded }) => {
       const newPreviews = [];
 
       for (const file of validFiles) {
-        // --- CORRECT ORIENTATION FIRST ---
-        // Correct the orientation before any other processing happens.
+        // --- STEP 1: CORRECT ORIENTATION FIRST ---
+        // This preserves the correct visual orientation in the file data
         const orientationCorrectedFile = await correctImageOrientation(file);
-        // --- END ORIENTATION CORRECTION ---
-
-        let processedFile = orientationCorrectedFile; // Use the corrected file from now on
         const originalSize = orientationCorrectedFile.size;
         
-        // Check if file needs conversion (HEIC, CR2, NEF, ARW, etc.)
-        const needsConversion = file.name.toLowerCase().endsWith('.heic') || 
-                               file.name.toLowerCase().endsWith('.cr2') ||
-                               file.name.toLowerCase().endsWith('.nef') ||
-                               file.name.toLowerCase().endsWith('.arw') ||
-                               file.type === 'image/heic';
+        let processedFile = orientationCorrectedFile;
+        
+        // --- STEP 2: CONVERT RAW FORMATS (HEIC, CR2, NEF, ARW) ---
+        const needsRawConversion = file.name.toLowerCase().endsWith('.heic') || 
+                                   file.name.toLowerCase().endsWith('.cr2') ||
+                                   file.name.toLowerCase().endsWith('.nef') ||
+                                   file.name.toLowerCase().endsWith('.arw') ||
+                                   file.type === 'image/heic';
 
-        if (needsConversion) {
-          console.log(`Converting ${file.name} to PNG...`);
+        if (needsRawConversion) {
+          console.log(`Converting RAW format ${file.name} to PNG...`);
           try {
             processedFile = await convertFileWithCloudConvert(orientationCorrectedFile);
           } catch (conversionError) {
@@ -133,19 +178,27 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onFilesUploaded }) => {
           }
         }
         
-        // Process and compress the image
+        // --- STEP 3: UNIVERSAL PNG CONVERSION ---
+        // Convert ALL formats (JPEG, WebP, PNG) to PNG to ensure consistency
+        // This preserves the orientation correction from Step 1
+        if (!processedFile.type.includes('png')) {
+          console.log(`Converting ${processedFile.name} (${processedFile.type}) to PNG...`);
+          processedFile = await convertToPngViaCanvas(processedFile);
+        } else {
+          console.log(`${processedFile.name} is already PNG format`);
+        }
+        
+        // --- STEP 4: COMPRESS IF NEEDED ---
         console.log(`Processing image: ${processedFile.name}, original size: ${(originalSize / (1024 * 1024)).toFixed(2)}MB`);
         const compressedBlob = await processAndCompressImage(processedFile, originalSize);
         
-        // Determine correct file type and name
-        const wasCompressed = originalSize > 5 * 1024 * 1024;
-        const mimeType = wasCompressed ? 'image/png' : processedFile.type;
-        const fileName = wasCompressed && !processedFile.name.toLowerCase().endsWith('.png') 
-          ? processedFile.name.replace(/\.[^/.]+$/, '.png')
-          : processedFile.name;
+        // All files are now PNG format
+        const fileName = processedFile.name.toLowerCase().endsWith('.png') 
+          ? processedFile.name
+          : processedFile.name.replace(/\.[^/.]+$/, '.png');
         
         const finalFile = new File([compressedBlob], fileName, {
-          type: mimeType,
+          type: 'image/png', // All files are PNG now
           lastModified: Date.now()
         }) as FileWithOriginalSize;
         finalFile.originalSize = originalSize;
