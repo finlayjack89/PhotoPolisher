@@ -3,6 +3,14 @@
 ## Overview
 LuxSnap is a professional photo editing platform designed for e-commerce and product photography. It uses AI for features like background removal, shadow generation, backdrop positioning, and batch processing to create studio-quality product images. The platform aims to streamline the product photography workflow and offers significant market potential for businesses requiring high-quality visual content.
 
+## Recent Changes
+**November 15, 2025 - Background Removal 404 Fix**
+- Fixed 404 errors in background removal by updating BackgroundRemovalStep to use new async job-based API
+- Deprecated old synchronous `api.removeBackground()` functions that called commented-out endpoints
+- Added `uploadFile()` function to convert File objects to opaque file IDs
+- Fixed critical file lookup bug where job results weren't mapping to original files
+- Both WorkflowPage Quick Actions and BackgroundRemovalStep now use consistent async job pattern
+
 ## User Preferences
 Preferred communication style: Simple, everyday language.
 
