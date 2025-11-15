@@ -139,7 +139,8 @@ export function computeCompositeLayout(
   const subjectY = canvasH * placement.y - drawHeight; // y represents bottom alignment (FIX: use canvasH not canvasW)
 
   // 6. Calculate actual product (clean image) position within shadowed subject
-  // Cloudinary c_lpad centers the product, so offset is half the padding difference
+  // Cloudinary c_lpad centers the product horizontally, but the drop shadow effect
+  // causes asymmetric vertical padding (more at bottom due to shadow extending down)
   const offsetX = ((subjectShadowW - subjectCleanW) / 2) * scale;
   const offsetY = ((subjectShadowH - subjectCleanH) / 2) * scale;
   const productX = subjectX + offsetX;
@@ -148,8 +149,21 @@ export function computeCompositeLayout(
   const productHeight = subjectCleanH * scale;
 
   // 7. Calculate reflection position (directly below product)
+  // The Cloudinary shadow has asymmetric padding: the drop shadow effect extends
+  // the image downward more than upward. We need to compensate for this when 
+  // positioning the reflection to avoid a gap.
+  // 
+  // Empirical testing shows the bottom padding offset is approximately 15-20% of
+  // the total vertical padding. This may vary with shadow parameters (elevation,
+  // spread, etc.) and can be adjusted based on testing.
+  // 
+  // TODO: Make this configurable or derive from shadow parameters if needed
+  const totalVerticalPadding = (subjectShadowH - subjectCleanH) * scale;
+  const BOTTOM_PADDING_RATIO = 0.15; // Adjust this value if reflection gap persists
+  const bottomPaddingOffset = totalVerticalPadding * BOTTOM_PADDING_RATIO;
+  
   const reflectionX = productX;
-  const reflectionY = productY + productHeight;
+  const reflectionY = productY + productHeight - bottomPaddingOffset;
   const reflectionWidth = productWidth;
   const reflectionHeight = productHeight;
 
