@@ -9,6 +9,7 @@ import { Loader2, Sparkles, SkipForward, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api-client";
 import { generateReflections } from "@/lib/reflection-utils";
+import { useWorkflow } from "@/contexts/WorkflowContext";
 
 interface ShadowGenerationStepProps {
   images: Array<{
@@ -36,11 +37,17 @@ export const ShadowGenerationStep: React.FC<ShadowGenerationStepProps> = ({
   const [previewAfter, setPreviewAfter] = useState<string>('');
   const [shadowedResults, setShadowedResults] = useState<Array<{ name: string; shadowedData: string }>>([]);
   const { toast } = useToast();
+  const { state, setShadowConfig } = useWorkflow();
   
-  // Shadow parameters
-  const [azimuth, setAzimuth] = useState(0);
-  const [elevation, setElevation] = useState(90);
-  const [spread, setSpread] = useState(5);
+  // Shadow parameters - initialize from context (always has defaults)
+  const [azimuth, setAzimuth] = useState(state.shadowConfig.azimuth);
+  const [elevation, setElevation] = useState(state.shadowConfig.elevation);
+  const [spread, setSpread] = useState(state.shadowConfig.spread);
+  
+  // Update context whenever shadow parameters change
+  useEffect(() => {
+    setShadowConfig({ azimuth, elevation, spread });
+  }, [azimuth, elevation, spread, setShadowConfig]);
   
   // Cloudinary preview state
   const [cloudinaryPublicId, setCloudinaryPublicId] = useState<string>('');

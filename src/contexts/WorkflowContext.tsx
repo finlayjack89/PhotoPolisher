@@ -1,5 +1,12 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useRef, useMemo, useCallback } from 'react';
 
+export interface ShadowConfig {
+  azimuth: number;
+  elevation: number;
+  spread: number;
+  opacity?: number;
+}
+
 interface WorkflowState {
   step: 'upload' | 'remove-bg' | 'position' | 'finalize';
   uploadedFileIds: string[];
@@ -13,7 +20,7 @@ interface WorkflowState {
   }>;
   selectedBackdropId: string | null;
   positioning: { x: number; y: number; scale: number } | null;
-  shadowConfig: any;
+  shadowConfig: ShadowConfig;
   reflectionConfig: any;
   batchId: string | null;
 }
@@ -27,7 +34,7 @@ interface WorkflowContextType {
   setProcessedSubjects: (subjects: WorkflowState['processedSubjects']) => void;
   setSelectedBackdropId: (id: string | null) => void;
   setPositioning: (positioning: WorkflowState['positioning']) => void;
-  setShadowConfig: (config: any) => void;
+  setShadowConfig: (config: Partial<ShadowConfig>) => void;
   setReflectionConfig: (config: any) => void;
   setBatchId: (id: string | null) => void;
   resetWorkflow: () => void;
@@ -40,13 +47,20 @@ const WorkflowContext = createContext<WorkflowContextType | undefined>(undefined
 
 const STORAGE_KEY = 'luxsnap-workflow-state';
 
+const DEFAULT_SHADOW_CONFIG: ShadowConfig = {
+  azimuth: 0,
+  elevation: 90,
+  spread: 5,
+  opacity: 75,
+};
+
 const initialState: WorkflowState = {
   step: 'upload',
   uploadedFileIds: [],
   processedSubjects: [],
   selectedBackdropId: null,
   positioning: null,
-  shadowConfig: null,
+  shadowConfig: DEFAULT_SHADOW_CONFIG,
   reflectionConfig: null,
   batchId: null,
 };
@@ -57,10 +71,29 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
-        return { ...initialState, ...parsed };
+        // Validate parsed is an object before using it
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          console.warn('Invalid workflow state in localStorage, using defaults');
+          localStorage.removeItem(STORAGE_KEY);
+          return initialState;
+        }
+        // Merge with initialState and ensure shadowConfig has defaults
+        return {
+          ...initialState,
+          ...parsed,
+          // Merge shadowConfig with defaults to handle legacy null/undefined values
+          shadowConfig: {
+            ...DEFAULT_SHADOW_CONFIG,
+            ...(parsed.shadowConfig && typeof parsed.shadowConfig === 'object' ? parsed.shadowConfig : {}),
+          },
+        };
       }
     } catch (error) {
       console.error('Failed to load workflow state from localStorage:', error);
+      // Clear corrupted data
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {}
     }
     return initialState;
   });
@@ -112,8 +145,15 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, positioning }));
   }, []);
 
-  const setShadowConfig = useCallback((config: any) => {
-    setState((prev) => ({ ...prev, shadowConfig: config }));
+  const setShadowConfig = useCallback((config: Partial<ShadowConfig>) => {
+    setState((prev) => ({ 
+      ...prev, 
+      shadowConfig: { 
+        ...DEFAULT_SHADOW_CONFIG, 
+        ...(prev.shadowConfig || {}), 
+        ...config 
+      } 
+    }));
   }, []);
 
   const setReflectionConfig = useCallback((config: any) => {

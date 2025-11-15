@@ -28,6 +28,7 @@ import { useToast } from "@/hooks/use-toast";
 import { BackdropLibrary } from "@/components/BackdropLibrary";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
+import { useWorkflow } from "@/contexts/WorkflowContext";
 
 // Define the type for a processed subject
 interface ProcessedSubject {
@@ -87,6 +88,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const { toast } = useToast();
+  const { state } = useWorkflow();
 
   const [subjectDimensions, setSubjectDimensions] = useState({ w: 1, h: 1 });
   const [backdropDimensions, setBackdropDimensions] = useState({ w: 1, h: 1 });
@@ -218,7 +220,9 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     // The canvas positions the shadowed subject (larger due to drop shadow) at placement.y,
     // then the clean product sits within it at an offset.
     // We need to replicate this in CSS so the preview matches the final render.
-    const shadowSpread = 5; // Default shadow spread value (from ShadowGenerationStep)
+    // 
+    // Read shadow spread from workflow context (defaults to 5 in context initialization)
+    const shadowSpread = state.shadowConfig.spread;
     const paddingMultiplier = Math.max(1.5, 1 + (shadowSpread / 100));
     // The clean product is centered within the shadowed image
     // offsetY = (shadowHeight - cleanHeight) / 2 = cleanHeight * (paddingMultiplier - 1) / 2
