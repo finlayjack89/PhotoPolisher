@@ -125,6 +125,7 @@ export async function compositeLayers(
     if (reflectionOptions && reflectionOptions.opacity > 0) {
       ctx.save();
 
+      // Reflection starts at the bottom of the actual product
       const reflectionY = actualProductY + cleanH;
 
       console.log('🪞 [Reflection] Drawing at:', {
@@ -133,20 +134,24 @@ export async function compositeLayers(
         dimensions: { width: cleanW, height: cleanH }
       });
 
-      // Position the reflection directly below the actual product
+      // Position and flip the reflection
+      // After translate, we're at the bottom edge of the product
+      // After scale(1, -1), Y coordinates are flipped
+      // So we draw at -cleanH to place the reflection below the product
       ctx.translate(actualProductX, reflectionY);
       ctx.scale(1, -1); // Flip vertically
 
       // Draw the CLEAN subject image at its NATURAL size (no scaling)
-      // This ensures reflection matches the visible product exactly
-      ctx.drawImage(cleanSubjectImg, 0, 0, cleanW, cleanH);
+      // Using negative Y to draw below the flip point in flipped coordinate space
+      ctx.drawImage(cleanSubjectImg, 0, -cleanH, cleanW, cleanH);
 
       // Create fade-out gradient using clean dimensions
+      // Gradient goes from top (strongest) to bottom (transparent) of the reflection
       const gradient = ctx.createLinearGradient(
         0,
+        -cleanH,  // Start at top of reflection in flipped space
         0,
-        0,
-        cleanH * reflectionOptions.falloff,
+        -cleanH + (cleanH * reflectionOptions.falloff),  // End at falloff point
       );
 
       const startOpacity = reflectionOptions.opacity;
@@ -155,7 +160,7 @@ export async function compositeLayers(
 
       ctx.globalCompositeOperation = 'destination-in';
       ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, cleanW, cleanH);
+      ctx.fillRect(0, -cleanH, cleanW, cleanH);
 
       ctx.restore();
     }
