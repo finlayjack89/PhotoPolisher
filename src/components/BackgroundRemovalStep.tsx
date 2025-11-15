@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { AlertCircle, ArrowLeft, ArrowRight, Loader2, Scissors, Download } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { api } from "@/lib/api-client";
+import { createBackgroundRemovalJob, getBackgroundRemovalJobStatus, uploadFile } from "@/lib/api-client";
 import { useToast } from "@/hooks/use-toast";
 
 interface BackgroundRemovalStepProps {
@@ -52,61 +52,99 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const processImageWithRetry = async (file: File, maxRetries = 3): Promise<ProcessedImage | null> => {
-    let lastError: any = null;
-    
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        console.log(`Processing ${file.name} - Attempt ${attempt}/${maxRetries}`);
+  const processImagesWithJob = async (files: File[]): Promise<ProcessedImage[]> => {
+    try {
+      // Step 1: Upload all files to get file IDs
+      setCurrentProcessingStep('Uploading files...');
+      const fileIds: string[] = [];
+      
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setProgress(((i / files.length) * 20)); // 0-20% for uploads
         
-        // Use new file upload API
-        const result = await api.removeBackground(file);
-
-        if (result?.images && result.images.length > 0) {
-          const processedImage = result.images[0];
-          
-          // Check if the backend returned an error flag
-          if (processedImage.error) {
-            throw new Error(processedImage.error);
-          }
-          
-          // Read original file as data URL for originalData
-          const originalDataUrl = await new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.readAsDataURL(file);
-          });
-
-          return {
-            name: processedImage.name,
-            originalData: originalDataUrl,
-            backgroundRemovedData: processedImage.transparentData,
-            size: processedImage.size,
-            originalSize: file.size
-          };
-        } else {
-          lastError = new Error('No results returned');
-          if (attempt < maxRetries) {
-            const delay = Math.pow(2, attempt - 1) * 1000;
-            console.log(`Retrying ${file.name} in ${delay}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            continue;
-          }
+        const uploadedFile = await uploadFile(file);
+        fileIds.push(uploadedFile.id);
+      }
+      
+      // Step 2: Create background removal job
+      setCurrentProcessingStep('Creating background removal job...');
+      const { jobId } = await createBackgroundRemovalJob(fileIds);
+      
+      // Step 3: Poll for completion
+      const pollInterval = 2000; // 2 seconds
+      const maxPolls = 150; // 5 minutes max
+      
+      for (let i = 0; i < maxPolls; i++) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        
+        const jobStatus = await getBackgroundRemovalJobStatus(jobId);
+        
+        // Update progress (20-90% range for processing)
+        if (jobStatus.progress) {
+          const processingProgress = 20 + ((jobStatus.progress.completed / jobStatus.progress.total) * 70);
+          setProgress(processingProgress);
+          setCurrentProcessingStep(`Processing ${jobStatus.progress.completed}/${jobStatus.progress.total} images...`);
         }
-      } catch (error) {
-        lastError = error;
-        if (attempt < maxRetries) {
-          const delay = Math.pow(2, attempt - 1) * 1000;
-          console.log(`Retrying ${file.name} in ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue; // Continue to next retry attempt
+        
+        if (jobStatus.status === 'completed') {
+          setProgress(90);
+          setCurrentProcessingStep('Finalizing results...');
+          
+          // Step 4: Convert results to ProcessedImage format
+          const processedImages: ProcessedImage[] = [];
+          const results = jobStatus.results || [];
+          
+          for (let j = 0; j < results.length; j++) {
+            const result = results[j];
+            const originalFile = files.find((f, idx) => fileIds[idx] === result.originalFileId);
+            
+            if (result.error || !result.processedUrl || !originalFile) {
+              throw new Error(result.error || 'Processing failed');
+            }
+            
+            // Read original file as data URL
+            const originalDataUrl = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(originalFile);
+            });
+            
+            // Fetch the processed image from the server
+            const processedResponse = await fetch(result.processedUrl);
+            const processedBlob = await processedResponse.blob();
+            const processedDataUrl = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(processedBlob);
+            });
+            
+            processedImages.push({
+              name: originalFile.name,
+              originalData: originalDataUrl,
+              backgroundRemovedData: processedDataUrl,
+              size: processedBlob.size,
+              originalSize: originalFile.size,
+            });
+            
+            setProgress(90 + ((j / results.length) * 10)); // 90-100%
+          }
+          
+          setProgress(100);
+          return processedImages;
+        }
+        
+        if (jobStatus.status === 'failed') {
+          throw new Error(jobStatus.error_message || 'Background removal failed');
         }
       }
+      
+      throw new Error('Background removal timeout - job took too long');
+    } catch (error) {
+      console.error('Background removal failed:', error);
+      throw error;
     }
-    
-    // All retries exhausted
-    console.error(`Failed to process ${file.name} after ${maxRetries} attempts:`, lastError);
-    return null;
   };
 
   const handleRemoveBackgrounds = async () => {
@@ -115,70 +153,33 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
     setFailedImages([]);
     setCurrentProcessingStep('Initializing...');
 
-    const allResults: ProcessedImage[] = [];
-    const failed: { name: string; error: string; file: File }[] = [];
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const imageProgress = ((i / files.length) * 100);
-
-      setCurrentProcessingStep(`Processing image ${i + 1} of ${files.length}: ${file.name}...`);
-      setProgress(imageProgress);
-
-      // Use retry logic with exponential backoff
-      const result = await processImageWithRetry(file);
+    try {
+      const results = await processImagesWithJob(files);
+      setProcessedImages(results);
+      setProgress(100);
+      setCurrentProcessingStep('Complete!');
       
-      if (result) {
-        allResults.push(result);
-      } else {
-        failed.push({
-          name: file.name,
-          error: "Failed after 3 retry attempts",
-          file: file
-        });
-        toast({
-          title: "Processing Failed",
-          description: `${file.name} failed after 3 retries. You can retry manually.`,
-          variant: "destructive",
-        });
-      }
-    }
-
-    setProgress(100);
-    setCurrentProcessingStep('Complete!');
-    setProcessedImages(allResults);
-    setFailedImages(failed);
-
-    if (failed.length === 0) {
-      onProcessingComplete(allResults);
-    }
-
-    setIsProcessingLocal(false);
-  };
-
-  const retryFailedImage = async (failedImage: { name: string; error: string; file: File }) => {
-    setCurrentProcessingStep(`Retrying ${failedImage.name}...`);
-
-    // Use retry logic with exponential backoff
-    const result = await processImageWithRetry(failedImage.file);
-
-    if (result) {
-      setProcessedImages(prev => [...prev, result]);
-      setFailedImages(prev => prev.filter(f => f.name !== failedImage.name));
-
       toast({
-        title: "Success!",
-        description: `${failedImage.name} processed successfully`,
+        title: 'Success!',
+        description: `Successfully processed ${results.length} image(s)`,
       });
-    } else {
+      
+      onProcessingComplete(results);
+    } catch (error: any) {
+      console.error('Background removal failed:', error);
       toast({
-        title: "Retry Failed",
-        description: `${failedImage.name} still failed after 3 retry attempts`,
-        variant: "destructive",
+        title: 'Processing Failed',
+        description: error.message || 'Failed to process images',
+        variant: 'destructive',
       });
+      setFailedImages(files.map(f => ({
+        name: f.name,
+        error: error.message || 'Unknown error',
+        file: f,
+      })));
+    } finally {
+      setIsProcessingLocal(false);
     }
-    
-    setCurrentProcessingStep('Retry complete.');
   };
 
   const shouldCompress = (size: number) => size > 5 * 1024 * 1024; // 5MB threshold
@@ -340,8 +341,8 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
           {failedImages.length > 0 && (
             <div className="space-y-4">
               <div className="text-center">
-                <h2 className="text-xl font-semibold text-destructive">Failed Images</h2>
-                <p className="text-muted-foreground">These images failed to process. Click retry to try again.</p>
+                <h2 className="text-xl font-semibold text-destructive">Processing Failed</h2>
+                <p className="text-muted-foreground">Background removal failed. Please try again.</p>
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -363,14 +364,6 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
                           className="w-full h-24 object-cover rounded border"
                         />
                         <p className="text-xs text-destructive">{image.error}</p>
-                        <Button
-                          size="sm"
-                          onClick={() => retryFailedImage(image)}
-                          className="w-full"
-                        >
-                          <Loader2 className="h-3 w-3 mr-1" />
-                          Retry
-                        </Button>
                       </div>
                     </CardContent>
                   </Card>

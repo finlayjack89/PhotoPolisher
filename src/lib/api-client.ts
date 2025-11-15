@@ -181,6 +181,53 @@ export const api = {
 };
 
 /**
+ * Upload a file to the server
+ * @param file The file to upload
+ * @returns Object containing fileId and other metadata
+ */
+export async function uploadFile(file: File): Promise<{ id: string; fileId: string; url: string }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const uploadResponse = await fetch('/api/files', {
+    method: 'POST',
+    body: formData,
+  });
+  
+  const responseText = await uploadResponse.text();
+  
+  if (!uploadResponse.ok) {
+    let error;
+    try {
+      error = responseText ? JSON.parse(responseText) : { error: 'Upload failed' };
+    } catch {
+      error = { error: 'Upload failed' };
+    }
+    throw new Error(error.error || `File upload failed: ${uploadResponse.status}`);
+  }
+  
+  let uploadResult;
+  try {
+    uploadResult = JSON.parse(responseText);
+  } catch {
+    throw new Error('Invalid response from file service');
+  }
+  
+  const fileId = uploadResult.fileId;
+  
+  if (!fileId) {
+    throw new Error('File service response missing file ID');
+  }
+  
+  // Return in a format that's easy to use
+  return {
+    id: fileId,
+    fileId: fileId,
+    url: uploadResult.url || `/api/files/${fileId}`,
+  };
+}
+
+/**
  * Upload a backdrop file (two-step process)
  * Step 1: Upload file to /api/upload to get BOTH legacy path and new file ID
  * Step 2: Create backdrop entry in database with metadata
