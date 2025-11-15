@@ -96,7 +96,10 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
           
           for (let j = 0; j < results.length; j++) {
             const result = results[j];
-            const originalFile = files.find((f, idx) => fileIds[idx] === result.originalFileId);
+            
+            // Find the original file by matching the fileId
+            const fileIndex = fileIds.indexOf(result.originalFileId);
+            const originalFile = fileIndex >= 0 ? files[fileIndex] : null;
             
             if (result.error || !result.processedUrl || !originalFile) {
               throw new Error(result.error || 'Processing failed');
