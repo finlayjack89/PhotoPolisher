@@ -33,6 +33,159 @@ export interface CompositeOptions {
 }
 
 /**
+ * Rectangle definition for layout calculations
+ */
+export interface LayoutRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Complete layout information for composite rendering
+ */
+export interface CompositeLayout {
+  canvasWidth: number;
+  canvasHeight: number;
+  shadowedSubjectRect: LayoutRect;  // Where to draw the shadowed subject
+  productRect: LayoutRect;          // Where the actual clean product appears
+  reflectionRect: LayoutRect;       // Where to draw the reflection
+  scale: number;                    // Overall scale factor applied
+}
+
+/**
+ * Computes the complete layout for compositing, ensuring preview and batch output match exactly.
+ * This unified calculation function ensures CSS preview and canvas output have identical dimensions and positioning.
+ * 
+ * @param subjectShadowW - Width of shadowed subject image (includes Cloudinary padding)
+ * @param subjectShadowH - Height of shadowed subject image (includes Cloudinary padding)
+ * @param subjectCleanW - Width of clean subject image (actual product, no padding)
+ * @param subjectCleanH - Height of clean subject image (actual product, no padding)
+ * @param paddingPercent - Padding percentage (e.g., 20 for 20%)
+ * @param aspectRatio - Target aspect ratio ('1:1', '3:4', '4:3', 'original')
+ * @param numericAspectRatio - Numeric aspect ratio for 'original' mode (width/height)
+ * @param placement - Subject placement coordinates (x, y normalized 0-1)
+ */
+export function computeCompositeLayout(
+  subjectShadowW: number,
+  subjectShadowH: number,
+  subjectCleanW: number,
+  subjectCleanH: number,
+  paddingPercent: number,
+  aspectRatio: string,
+  numericAspectRatio: number | undefined,
+  placement: SubjectPlacement
+): CompositeLayout {
+  /**
+   * ARCHITECTURE:
+   * - The shadow asset (from Cloudinary with c_lpad) is our "content"
+   * - The shadow asset should occupy (1 - 2*p) of the final canvas
+   * - This matches how the preview works: subject width = (1 - 2*p) * 100%
+   */
+  const p = paddingPercent / 100;
+
+  // 1. Calculate canvas size where shadow occupies (1-2p) of the space
+  // If padding is 20%, shadow occupies 60% of canvas
+  const baseCanvasW = subjectShadowW / (1 - 2 * p);
+  const baseCanvasH = subjectShadowH / (1 - 2 * p);
+
+  // 2. Determine target aspect ratio
+  let targetRatio: number;
+  if (aspectRatio === '1:1') targetRatio = 1;
+  else if (aspectRatio === '4:3') targetRatio = 4 / 3;
+  else if (aspectRatio === '3:4') targetRatio = 3 / 4;
+  else if (aspectRatio === 'original' && numericAspectRatio) {
+    targetRatio = numericAspectRatio;
+  } else {
+    // Fallback to base canvas dimensions
+    targetRatio = baseCanvasW / baseCanvasH;
+  }
+
+  // 3. Calculate final canvas size enforcing aspect ratio
+  let canvasW: number, canvasH: number;
+  if (baseCanvasW / baseCanvasH >= targetRatio) {
+    canvasW = baseCanvasW;
+    canvasH = canvasW / targetRatio;
+  } else {
+    canvasH = baseCanvasH;
+    canvasW = canvasH * targetRatio;
+  }
+
+  // 4. Calculate scale factor
+  // Shadow should occupy (1-2p) of the canvas
+  const scaleW = ((1 - 2 * p) * canvasW) / subjectShadowW;
+  const scaleH = ((1 - 2 * p) * canvasH) / subjectShadowH;
+  const scale = Math.min(scaleW, scaleH);
+
+  // 5. Calculate shadowed subject drawing dimensions and position
+  const drawWidth = subjectShadowW * scale;
+  const drawHeight = subjectShadowH * scale;
+  const subjectX = canvasW * placement.x - drawWidth / 2;
+  const subjectY = canvasH * placement.y - drawHeight; // y represents bottom alignment (FIX: use canvasH not canvasW)
+
+  // 6. Calculate actual product (clean image) position within shadowed subject
+  // Cloudinary c_lpad centers the product, so offset is half the padding difference
+  const offsetX = ((subjectShadowW - subjectCleanW) / 2) * scale;
+  const offsetY = ((subjectShadowH - subjectCleanH) / 2) * scale;
+  const productX = subjectX + offsetX;
+  const productY = subjectY + offsetY;
+  const productWidth = subjectCleanW * scale;
+  const productHeight = subjectCleanH * scale;
+
+  // 7. Calculate reflection position (directly below product)
+  const reflectionX = productX;
+  const reflectionY = productY + productHeight;
+  const reflectionWidth = productWidth;
+  const reflectionHeight = productHeight;
+
+  console.log('📐 [Layout Calculation]', {
+    input: {
+      shadowDims: { w: subjectShadowW, h: subjectShadowH },
+      cleanDims: { w: subjectCleanW, h: subjectCleanH },
+      padding: paddingPercent,
+      aspectRatio,
+      placement
+    },
+    calculated: {
+      baseCanvasSize: { w: baseCanvasW, h: baseCanvasH },
+      targetRatio,
+      canvas: { w: canvasW, h: canvasH },
+      scale
+    },
+    output: {
+      shadowedSubject: { x: subjectX, y: subjectY, w: drawWidth, h: drawHeight },
+      product: { x: productX, y: productY, w: productWidth, h: productHeight },
+      reflection: { x: reflectionX, y: reflectionY, w: reflectionWidth, h: reflectionHeight }
+    }
+  });
+
+  return {
+    canvasWidth: Math.round(canvasW),
+    canvasHeight: Math.round(canvasH),
+    shadowedSubjectRect: {
+      x: Math.round(subjectX),
+      y: Math.round(subjectY),
+      width: Math.round(drawWidth),
+      height: Math.round(drawHeight)
+    },
+    productRect: {
+      x: Math.round(productX),
+      y: Math.round(productY),
+      width: Math.round(productWidth),
+      height: Math.round(productHeight)
+    },
+    reflectionRect: {
+      x: Math.round(reflectionX),
+      y: Math.round(reflectionY),
+      width: Math.round(reflectionWidth),
+      height: Math.round(reflectionHeight)
+    },
+    scale
+  };
+}
+
+/**
  * Gets the dimensions of an image from its URL.
  */
 export async function getImageDimensions(
@@ -48,15 +201,74 @@ export async function getImageDimensions(
 }
 
 /**
- * Composites all layers onto a single canvas.
- * This function now calculates final positioning and generates reflections.
+ * Draws a reflection of the clean subject image onto the main canvas.
+ * The reflection is vertically flipped and has a gradient fade from opaque to transparent.
+ * 
+ * @param ctx - Main canvas context to draw the reflection onto
+ * @param cleanSubjectImg - The clean subject image (HTMLImageElement)
+ * @param reflectionRect - Where to draw the reflection (x, y, width, height)
+ * @param reflectionOptions - Opacity and falloff parameters
+ */
+function drawReflection(
+  ctx: CanvasRenderingContext2D,
+  cleanSubjectImg: HTMLImageElement,
+  reflectionRect: LayoutRect,
+  reflectionOptions: ReflectionOptions
+): void {
+  const { x, y, width, height } = reflectionRect;
+  const { opacity, falloff } = reflectionOptions;
+
+  // Create temporary canvas for reflection rendering
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = width;
+  tempCanvas.height = height;
+  const tempCtx = tempCanvas.getContext('2d');
+
+  if (!tempCtx) {
+    console.error('Failed to create temp canvas context for reflection');
+    return;
+  }
+
+  // 1. Draw the clean subject flipped vertically
+  tempCtx.save();
+  tempCtx.translate(0, height);
+  tempCtx.scale(1, -1);
+  tempCtx.drawImage(cleanSubjectImg, 0, 0, width, height);
+  tempCtx.restore();
+
+  // 2. Apply gradient fade using destination-out composition
+  // This creates a fade from full intensity (top) to transparent (bottom)
+  const gradient = tempCtx.createLinearGradient(0, 0, 0, height * falloff);
+  gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');  // Top: keep full intensity (0 alpha removed)
+  gradient.addColorStop(1, 'rgba(0, 0, 0, 1)');   // Bottom: fully transparent (1 alpha removed)
+
+  tempCtx.globalCompositeOperation = 'destination-out';
+  tempCtx.fillStyle = gradient;
+  tempCtx.fillRect(0, 0, width, height);
+
+  // 3. Composite the reflection onto the main canvas with opacity applied
+  ctx.globalAlpha = opacity;
+  ctx.drawImage(tempCanvas, x, y);
+  ctx.globalAlpha = 1.0;
+
+  console.log('🪞 [Reflection] Drawn at:', {
+    position: { x, y },
+    dimensions: { width, height },
+    opacity,
+    falloff
+  });
+}
+
+/**
+ * Composites all layers onto a single canvas using computeCompositeLayout for unified positioning.
+ * This ensures the output matches the preview exactly.
+ * 
+ * NOTE: This function is DEPRECATED - use the new compositeLayers interface below instead.
  */
 export async function compositeLayers(
   options: CompositeOptions,
 ): Promise<Blob | null> {
   const {
-    outputWidth,
-    outputHeight,
     backdropUrl,
     subjectLayer,
     cleanSubjectUrl,
@@ -66,8 +278,6 @@ export async function compositeLayers(
   } = options;
 
   const canvas = document.createElement('canvas');
-  canvas.width = outputWidth;
-  canvas.height = outputHeight;
   const ctx = canvas.getContext('2d');
 
   if (!ctx) {
@@ -76,133 +286,166 @@ export async function compositeLayers(
   }
 
   try {
-    // 1. Draw Backdrop
-    const backdropImg = await loadImage(backdropUrl);
-    ctx.drawImage(backdropImg, 0, 0, outputWidth, outputHeight);
-
-    // 2. Load BOTH subject images
-    const [subjectImg, cleanSubjectImg] = await Promise.all([
+    // Load all required images
+    const [backdropImg, subjectImg, cleanSubjectImg] = await Promise.all([
+      loadImage(backdropUrl),
       loadImage(subjectLayer.url),       // Shadowed
-      loadImage(cleanSubjectUrl),      // Clean
+      loadImage(cleanSubjectUrl),        // Clean
     ]);
 
-    // 3. Get dimensions for both images
-    const subjectW = subjectLayer.width;   // Shadowed dimensions (includes padding from drop shadow)
-    const subjectH = subjectLayer.height;
-    const cleanW = cleanSubjectImg.naturalWidth;   // Clean dimensions (actual product size)
+    // Get clean subject dimensions (no padding)
+    const cleanW = cleanSubjectImg.naturalWidth;
     const cleanH = cleanSubjectImg.naturalHeight;
 
-    console.log('🎨 [Compositing] Dimensions:', {
-      shadowed: { width: subjectW, height: subjectH },
+    console.log('🎨 [Compositing - DEPRECATED] Using old interface. Consider migrating to new interface.');
+    console.log('Dimensions:', {
+      shadowed: { width: subjectLayer.width, height: subjectLayer.height },
       clean: { width: cleanW, height: cleanH },
-      output: { width: outputWidth, height: outputHeight }
+      requestedOutput: { width: options.outputWidth, height: options.outputHeight }
     });
 
-    // 4. Calculate Final Positioning based on normalized coordinates
-    // Use SHADOWED dimensions for initial positioning (includes shadow padding)
-    const finalX = Math.round((outputWidth * placement.x) - (subjectW / 2));
-    
-    // Y position: placement.y represents where the bottom of the subject should be
-    // 0 = top, 1 = bottom, 0.75 = 75% down (typical floor position)
-    const finalY = Math.round((outputHeight * placement.y) - subjectH);
+    // FALLBACK: Use the provided dimensions for now (old behavior)
+    // TODO: Migrate callers to use the new interface
+    canvas.width = options.outputWidth;
+    canvas.height = options.outputHeight;
 
-    // Calculate where the ACTUAL PRODUCT appears within the shadowed image
-    // Cloudinary uses c_lpad which centers the product within the padded canvas
-    const productOffsetX = (subjectW - cleanW) / 2;
-    const productOffsetY = (subjectH - cleanH) / 2;
+    // Draw backdrop
+    ctx.drawImage(backdropImg, 0, 0, canvas.width, canvas.height);
 
-    // Actual product position in the output canvas
-    const actualProductX = Math.round(finalX + productOffsetX);
-    const actualProductY = Math.round(finalY + productOffsetY);
+    // Calculate positioning using old logic
+    const finalX = Math.round((canvas.width * placement.x) - (subjectLayer.width / 2));
+    const finalY = Math.round((canvas.height * placement.y) - subjectLayer.height);
 
-    console.log('📍 [Compositing] Positions:', {
-      shadowedImage: { x: finalX, y: finalY },
-      productOffset: { x: productOffsetX, y: productOffsetY },
-      actualProduct: { x: actualProductX, y: actualProductY }
-    });
-
-    // 5. Draw Reflection (IF ENABLED) - positioned to match actual product
+    // Draw reflection if enabled
     if (reflectionOptions && reflectionOptions.opacity > 0) {
-      // Calculate the scale factor between clean and displayed subject
-      // The displayed subject dimensions include shadow padding
-      // We need to find the actual product size within the shadowed image
-      
-      // Estimate the actual product size within the shadowed image
-      // Cloudinary's drop shadow typically adds 1.5x-2x padding
-      // The product is centered within this padded area
-      const estimatedProductWidth = subjectW / 1.5;  // Approximate product width
-      const estimatedProductHeight = subjectH / 1.5; // Approximate product height
-      
-      // Calculate scale factors
-      const scaleX = estimatedProductWidth / cleanW;
-      const scaleY = estimatedProductHeight / cleanH;
-      
-      // Use the smaller scale to maintain aspect ratio
-      const scale = Math.min(scaleX, scaleY);
-      
-      // Calculate scaled dimensions for the reflection
-      const scaledReflectionW = cleanW * scale;
-      const scaledReflectionH = cleanH * scale;
-      
-      // Create a temporary canvas for the reflection at scaled size
-      const reflectionCanvas = document.createElement('canvas');
-      reflectionCanvas.width = scaledReflectionW;
-      reflectionCanvas.height = scaledReflectionH;
-      const reflectionCtx = reflectionCanvas.getContext('2d');
-      
-      if (reflectionCtx) {
-        // Draw the flipped and scaled clean subject on the temporary canvas
-        reflectionCtx.save();
-        reflectionCtx.translate(0, scaledReflectionH);
-        reflectionCtx.scale(1, -1);
-        // Draw clean subject scaled to match displayed product size
-        reflectionCtx.drawImage(cleanSubjectImg, 0, 0, scaledReflectionW, scaledReflectionH);
-        reflectionCtx.restore();
-        
-        // Apply gradient fade on the temporary canvas
-        const gradient = reflectionCtx.createLinearGradient(
-          0,
-          0,  // Start at top of reflection
-          0,
-          scaledReflectionH * reflectionOptions.falloff  // End at falloff point
-        );
-        
-        gradient.addColorStop(0, `rgba(255, 255, 255, ${reflectionOptions.opacity})`);
-        gradient.addColorStop(1, `rgba(255, 255, 255, 0)`);
-        
-        reflectionCtx.globalCompositeOperation = 'destination-out';
-        reflectionCtx.fillStyle = gradient;
-        reflectionCtx.fillRect(0, 0, scaledReflectionW, scaledReflectionH);
-        
-        // Calculate where reflection should be drawn
-        // Center the reflection under the product
-        const reflectionX = finalX + (subjectW - scaledReflectionW) / 2;
-        const reflectionY = finalY + subjectH;
-        
-        console.log('🪞 [Reflection] Drawing at:', {
-          x: reflectionX,
-          y: reflectionY,
-          originalDimensions: { width: cleanW, height: cleanH },
-          scaledDimensions: { width: scaledReflectionW, height: scaledReflectionH },
-          scale: scale
-        });
-        
-        // Draw the reflection from temporary canvas onto main canvas
-        ctx.globalAlpha = reflectionOptions.opacity;
-        ctx.drawImage(reflectionCanvas, reflectionX, reflectionY);
-        ctx.globalAlpha = 1.0;
-      }
+      const productOffsetX = (subjectLayer.width - cleanW) / 2;
+      const productOffsetY = (subjectLayer.height - cleanH) / 2;
+      const actualProductX = finalX + productOffsetX;
+      const actualProductY = finalY + productOffsetY;
+
+      const estimatedScale = Math.min(
+        (subjectLayer.width / 1.5) / cleanW,
+        (subjectLayer.height / 1.5) / cleanH
+      );
+
+      drawReflection(
+        ctx,
+        cleanSubjectImg,
+        {
+          x: Math.round(actualProductX),
+          y: Math.round(actualProductY + cleanH * estimatedScale),
+          width: Math.round(cleanW * estimatedScale),
+          height: Math.round(cleanH * estimatedScale)
+        },
+        reflectionOptions
+      );
     }
 
-    // 6. Draw Main Subject (on top of backdrop and reflection)
-    ctx.drawImage(subjectImg, finalX, finalY, subjectW, subjectH);
+    // Draw shadowed subject on top
+    ctx.drawImage(subjectImg, finalX, finalY, subjectLayer.width, subjectLayer.height);
 
-    // 6. Export canvas to blob
+    // Export to blob
     return new Promise((resolve) => {
       canvas.toBlob(resolve, 'image/png');
     });
   } catch (error) {
     console.error('Error during canvas compositing:', error);
+    return null;
+  }
+}
+
+/**
+ * NEW INTERFACE: Composites layers using unified layout calculation.
+ * This ensures preview and batch output match exactly.
+ */
+export interface CompositeLayersV2Options {
+  backdropUrl: string;
+  shadowedSubjectUrl: string;
+  cleanSubjectUrl: string;
+  shadowedSubjectWidth: number;
+  shadowedSubjectHeight: number;
+  cleanSubjectWidth: number;
+  cleanSubjectHeight: number;
+  placement: SubjectPlacement;
+  paddingPercent: number;
+  aspectRatio: string;
+  numericAspectRatio?: number;
+  reflectionOptions?: ReflectionOptions;
+}
+
+export async function compositeLayersV2(
+  options: CompositeLayersV2Options
+): Promise<Blob | null> {
+  const {
+    backdropUrl,
+    shadowedSubjectUrl,
+    cleanSubjectUrl,
+    shadowedSubjectWidth,
+    shadowedSubjectHeight,
+    cleanSubjectWidth,
+    cleanSubjectHeight,
+    placement,
+    paddingPercent,
+    aspectRatio,
+    numericAspectRatio,
+    reflectionOptions
+  } = options;
+
+  // 1. Compute unified layout
+  const layout = computeCompositeLayout(
+    shadowedSubjectWidth,
+    shadowedSubjectHeight,
+    cleanSubjectWidth,
+    cleanSubjectHeight,
+    paddingPercent,
+    aspectRatio,
+    numericAspectRatio,
+    placement
+  );
+
+  // 2. Create canvas with calculated dimensions
+  const canvas = document.createElement('canvas');
+  canvas.width = layout.canvasWidth;
+  canvas.height = layout.canvasHeight;
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    console.error('Failed to get canvas context');
+    return null;
+  }
+
+  try {
+    // 3. Load all images
+    const [backdropImg, shadowedSubjectImg, cleanSubjectImg] = await Promise.all([
+      loadImage(backdropUrl),
+      loadImage(shadowedSubjectUrl),
+      loadImage(cleanSubjectUrl)
+    ]);
+
+    console.log('🎨 [Compositing V2] Using unified layout calculation');
+
+    // 4. Draw backdrop
+    ctx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
+
+    // 5. Draw shadow layer (shadowedSubject from Cloudinary contains ONLY the shadow)
+    const shadowRect = layout.shadowedSubjectRect;
+    ctx.drawImage(shadowedSubjectImg, shadowRect.x, shadowRect.y, shadowRect.width, shadowRect.height);
+
+    // 6. Draw reflection (if enabled) - BEFORE drawing the clean product
+    if (reflectionOptions && reflectionOptions.opacity > 0) {
+      drawReflection(ctx, cleanSubjectImg, layout.reflectionRect, reflectionOptions);
+    }
+
+    // 7. Draw clean product on top
+    const productRect = layout.productRect;
+    ctx.drawImage(cleanSubjectImg, productRect.x, productRect.y, productRect.width, productRect.height);
+
+    // 7. Export to blob
+    return new Promise((resolve) => {
+      canvas.toBlob(resolve, 'image/png');
+    });
+  } catch (error) {
+    console.error('Error during canvas compositing V2:', error);
     return null;
   }
 }

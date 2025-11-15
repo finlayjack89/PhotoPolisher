@@ -14,6 +14,7 @@ import { api } from "@/lib/api-client";
 import { 
   SubjectPlacement, 
   compositeLayers, 
+  compositeLayersV2,
   getImageDimensions,
   type CompositeOptions,
   type ReflectionOptions
@@ -276,37 +277,30 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
       setCurrentStep(`Compositing ${index + 1} / ${successfulJobs.length}: ${job.name}`);
 
       try {
-        // --- Step 3: Calculate Crop ---
-        const { width, height } = await getImageDimensions(job.final_image_url);
-        if (width === 0 || height === 0) throw new Error("Subject dimensions are zero");
+        // --- Step 3: Get shadowed subject dimensions ---
+        const { width: shadowedWidth, height: shadowedHeight } = await getImageDimensions(job.final_image_url);
+        if (shadowedWidth === 0 || shadowedHeight === 0) throw new Error("Shadowed subject dimensions are zero");
 
-        const outputCanvasSize = calculateCanvasSize(
-          width,
-          height,
-          masterRules.padding,
-          masterRules.aspectRatio,
-          masterRules.numericAspectRatio
-        );
+        // --- Step 3.5: Get clean subject dimensions ---
+        const { width: cleanWidth, height: cleanHeight } = await getImageDimensions(job.cleanCutoutData);
+        if (cleanWidth === 0 || cleanHeight === 0) throw new Error("Clean subject dimensions are zero");
 
-        // --- Step 4: Final Composite (Client-side) ---
-        const compositeOptions: CompositeOptions = {
-          outputWidth: outputCanvasSize.width,
-          outputHeight: outputCanvasSize.height,
+        // --- Step 4: Final Composite using unified layout calculation ---
+        const finalImageBlob = await compositeLayersV2({
           backdropUrl: backdrop,
-          subjectLayer: {
-            url: job.final_image_url, // Shadowed subject
-            x: 0, // compositeLayers will calculate x/y
-            y: 0,
-            width: width,
-            height: height
-          },
-          cleanSubjectUrl: job.cleanCutoutData, // Clean subject
+          shadowedSubjectUrl: job.final_image_url,
+          cleanSubjectUrl: job.cleanCutoutData,
+          shadowedSubjectWidth: shadowedWidth,
+          shadowedSubjectHeight: shadowedHeight,
+          cleanSubjectWidth: cleanWidth,
+          cleanSubjectHeight: cleanHeight,
           placement: masterRules.placement,
           paddingPercent: masterRules.padding,
+          aspectRatio: masterRules.aspectRatio,
+          numericAspectRatio: masterRules.numericAspectRatio,
           reflectionOptions: masterRules.reflectionOptions
-        };
+        });
 
-        const finalImageBlob = await compositeLayers(compositeOptions);
         if (!finalImageBlob) throw new Error("Canvas compositing failed");
 
         const compositedDataUrl = await new Promise<string>((resolve, reject) => {
