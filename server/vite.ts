@@ -7,34 +7,52 @@ import { createServer as createViteServer } from "vite";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export async function setupVite(app: express.Application) {
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: "custom",
-    base: "/",
-  });
+  const isProduction = process.env.NODE_ENV === "production";
 
-  app.use(vite.middlewares);
-  
-  // Catch-all route handler for client-side routing
-  // This serves index.html for all non-API routes
-  app.use(async (req: Request, res: Response, next: NextFunction) => {
-    // Skip API routes and file requests
-    if (req.originalUrl.startsWith("/api/") || req.method !== "GET") {
-      return next();
-    }
+  if (isProduction) {
+    // Production mode: serve pre-built static files
+    const distPath = path.resolve(__dirname, "..", "..", "dist", "client");
+    
+    // Serve static assets from dist folder
+    app.use(express.static(distPath));
+    
+    // Catch-all route for client-side routing
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      // Skip API routes and non-GET requests
+      if (req.originalUrl.startsWith("/api/") || req.method !== "GET") {
+        return next();
+      }
+      
+      // Serve index.html for all other routes (client-side routing)
+      const indexPath = path.join(distPath, "index.html");
+      res.sendFile(indexPath);
+    });
+  } else {
+    // Development mode: use Vite dev server
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "custom",
+      base: "/",
+    });
 
-    const url = req.originalUrl;
+    app.use(vite.middlewares);
+    
+    app.use(async (req: Request, res: Response, next: NextFunction) => {
+      if (req.originalUrl.startsWith("/api/") || req.method !== "GET") {
+        return next();
+      }
 
-    try {
-      const htmlPath = path.resolve(__dirname, "..", "index.html");
+      const url = req.originalUrl;
 
-      let template = fs.readFileSync(htmlPath, "utf-8");
-      template = await vite.transformIndexHtml(url, template);
-
-      res.status(200).set({ "Content-Type": "text/html" }).end(template);
-    } catch (e: any) {
-      vite.ssrFixStacktrace(e);
-      next(e);
-    }
-  });
+      try {
+        const htmlPath = path.resolve(__dirname, "..", "index.html");
+        let template = fs.readFileSync(htmlPath, "utf-8");
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ "Content-Type": "text/html" }).end(template);
+      } catch (e: any) {
+        vite.ssrFixStacktrace(e);
+        next(e);
+      }
+    });
+  }
 }
