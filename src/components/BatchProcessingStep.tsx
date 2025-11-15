@@ -142,12 +142,12 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
     setCurrentStep(`Starting ${subjects.length} processing jobs...`);
     const newJobs: Job[] = [];
 
-    // TODO: These options should be passed in via masterRules
-    // from ProductConfiguration -> CommercialEditingWorkflow
-    const shadowOptions = { azimuth: 135, elevation: 45, spread: 10, opacity: 75 };
-    const reflectionOptions = { opacity: 0.4, falloff: 0.5 };
+    // Use shadow and reflection options from masterRules if they exist,
+    // otherwise use defaults
+    const shadowOptions = masterRules.shadowOptions || { azimuth: 135, elevation: 45, spread: 10, opacity: 75 };
+    const reflectionOptions = masterRules.reflectionOptions || { opacity: 0.65, falloff: 0.8 };
 
-    // Store all rules
+    // Store the options back in masterRules
     masterRules.shadowOptions = shadowOptions;
     masterRules.reflectionOptions = reflectionOptions;
 

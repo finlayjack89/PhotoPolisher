@@ -123,46 +123,49 @@ export async function compositeLayers(
 
     // 5. Draw Reflection (IF ENABLED) - positioned to match actual product
     if (reflectionOptions && reflectionOptions.opacity > 0) {
-      ctx.save();
-
-      // Reflection starts at the bottom of the actual product
-      const reflectionY = actualProductY + cleanH;
-
-      console.log('🪞 [Reflection] Drawing at:', {
-        x: actualProductX,
-        y: reflectionY,
-        dimensions: { width: cleanW, height: cleanH }
-      });
-
-      // Position and flip the reflection
-      // After translate, we're at the bottom edge of the product
-      // After scale(1, -1), Y coordinates are flipped
-      // So we draw at -cleanH to place the reflection below the product
-      ctx.translate(actualProductX, reflectionY);
-      ctx.scale(1, -1); // Flip vertically
-
-      // Draw the CLEAN subject image at its NATURAL size (no scaling)
-      // Using negative Y to draw below the flip point in flipped coordinate space
-      ctx.drawImage(cleanSubjectImg, 0, -cleanH, cleanW, cleanH);
-
-      // Create fade-out gradient using clean dimensions
-      // Gradient goes from top (strongest) to bottom (transparent) of the reflection
-      const gradient = ctx.createLinearGradient(
-        0,
-        -cleanH,  // Start at top of reflection in flipped space
-        0,
-        -cleanH + (cleanH * reflectionOptions.falloff),  // End at falloff point
-      );
-
-      const startOpacity = reflectionOptions.opacity;
-      gradient.addColorStop(0, `rgba(0, 0, 0, ${startOpacity})`);
-      gradient.addColorStop(1, `rgba(0, 0, 0, 0)`);
-
-      ctx.globalCompositeOperation = 'destination-in';
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, -cleanH, cleanW, cleanH);
-
-      ctx.restore();
+      // Create a temporary canvas for the reflection to avoid destroying the backdrop
+      const reflectionCanvas = document.createElement('canvas');
+      reflectionCanvas.width = cleanW;
+      reflectionCanvas.height = cleanH;
+      const reflectionCtx = reflectionCanvas.getContext('2d');
+      
+      if (reflectionCtx) {
+        // Draw the flipped clean subject on the temporary canvas
+        reflectionCtx.save();
+        reflectionCtx.translate(0, cleanH);
+        reflectionCtx.scale(1, -1);
+        reflectionCtx.drawImage(cleanSubjectImg, 0, 0, cleanW, cleanH);
+        reflectionCtx.restore();
+        
+        // Apply gradient fade on the temporary canvas
+        const gradient = reflectionCtx.createLinearGradient(
+          0,
+          0,  // Start at top of reflection
+          0,
+          cleanH * reflectionOptions.falloff  // End at falloff point
+        );
+        
+        gradient.addColorStop(0, `rgba(255, 255, 255, ${reflectionOptions.opacity})`);
+        gradient.addColorStop(1, `rgba(255, 255, 255, 0)`);
+        
+        reflectionCtx.globalCompositeOperation = 'destination-out';
+        reflectionCtx.fillStyle = gradient;
+        reflectionCtx.fillRect(0, 0, cleanW, cleanH);
+        
+        // Calculate where reflection should be drawn
+        const reflectionY = actualProductY + cleanH;
+        
+        console.log('🪞 [Reflection] Drawing at:', {
+          x: actualProductX,
+          y: reflectionY,
+          dimensions: { width: cleanW, height: cleanH }
+        });
+        
+        // Draw the reflection from temporary canvas onto main canvas
+        ctx.globalAlpha = reflectionOptions.opacity;
+        ctx.drawImage(reflectionCanvas, actualProductX, reflectionY, cleanW, cleanH);
+        ctx.globalAlpha = 1.0;
+      }
     }
 
     // 6. Draw Main Subject (on top of backdrop and reflection)
