@@ -4,6 +4,13 @@
 LuxSnap is a professional photo editing platform designed for e-commerce and product photography. It uses AI for features like background removal, shadow generation, backdrop positioning, and batch processing to create studio-quality product images. The platform aims to streamline the product photography workflow and offers significant market potential for businesses requiring high-quality visual content.
 
 ## Recent Changes
+**November 15, 2025 - Production Deployment Fix**
+- Fixed critical production deployment issue where app ran in development mode on Replit Autoscale
+- Updated server to detect `REPLIT_DEPLOYMENT=1` environment variable (set by Autoscale)
+- Production mode now serves pre-built static files from dist/ folder instead of Vite dev server
+- Eliminated WebSocket connection errors, HMR timeouts, and port 24678 connection failures
+- Full workflow now functional in production deployment with no dev-only artifacts
+
 **November 15, 2025 - Background Removal 404 Fix**
 - Fixed 404 errors in background removal by updating BackgroundRemovalStep to use new async job-based API
 - Deprecated old synchronous `api.removeBackground()` functions that called commented-out endpoints
@@ -38,6 +45,7 @@ Preferred communication style: Simple, everyday language.
 - **Opaque File IDs**: UUID-based IDs abstract storage details, enabling cloud migration and eliminating legacy file path issues.
 - **Comprehensive API Hardening**: Includes timeout control, exponential backoff, and defensive parsing for all external API integrations to ensure reliability.
 - **Async Job Queue for Background Removal**: Prevents Node.js event loop blocking that caused WebSocket disconnections. Uses immediate 202 response, parallel worker processing (concurrency=3), file URLs instead of base64, and frontend polling every 2 seconds.
+- **Production Deployment Strategy**: Dual-mode server architecture detects production environment via `REPLIT_DEPLOYMENT=1` or `NODE_ENV=production`. Development mode uses Vite dev server with HMR for fast iteration. Production mode serves pre-built static files from dist/ folder, eliminating all dev-only WebSocket connections and ensuring stable deployment on Replit Autoscale.
 
 ## External Dependencies
 

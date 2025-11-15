@@ -7,9 +7,11 @@ import { createServer as createViteServer } from "vite";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export async function setupVite(app: express.Application) {
-  const isProduction = process.env.NODE_ENV === "production";
+  const isProduction = process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT === "1";
 
   if (isProduction) {
+    console.log("[Server] Running in PRODUCTION mode - serving built files from dist/");
+
     // Production mode: serve pre-built static files
     const distPath = path.resolve(__dirname, "..", "dist");
     
