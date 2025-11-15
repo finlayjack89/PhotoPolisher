@@ -159,7 +159,7 @@ export function computeCompositeLayout(
   // 
   // TODO: Make this configurable or derive from shadow parameters if needed
   const totalVerticalPadding = (subjectShadowH - subjectCleanH) * scale;
-  const BOTTOM_PADDING_RATIO = 0.50; // Adjust this value if reflection gap persists
+  const BOTTOM_PADDING_RATIO = 0.70; // Adjust this value if reflection gap persists
   const bottomPaddingOffset = totalVerticalPadding * BOTTOM_PADDING_RATIO;
   
   const reflectionX = productX;
