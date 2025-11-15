@@ -214,6 +214,17 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
       }
     }
     
+    // Calculate shadow offset to match canvas rendering
+    // The canvas positions the shadowed subject (larger due to drop shadow) at placement.y,
+    // then the clean product sits within it at an offset.
+    // We need to replicate this in CSS so the preview matches the final render.
+    const shadowSpread = 5; // Default shadow spread value (from ShadowGenerationStep)
+    const paddingMultiplier = Math.max(1.5, 1 + (shadowSpread / 100));
+    // The clean product is centered within the shadowed image
+    // offsetY = (shadowHeight - cleanHeight) / 2 = cleanHeight * (paddingMultiplier - 1) / 2
+    // As a percentage of clean product height: (paddingMultiplier - 1) / 2 * 100
+    const shadowOffsetPercent = ((paddingMultiplier - 1) / 2) * 100;
+    
     return {
       backdropStyles: {
         backgroundImage: `url(${backdrop})`,
@@ -227,9 +238,9 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         height: 'auto',
         left: `50%`,
         top: `${placement.y * 100}%`,
-        // --- THIS IS THE BUG FIX ---
-        // Aligns the *bottom* of the image to the y-coordinate
-        transform: 'translate(-50%, -100%)', 
+        // Position to match canvas: shadow bottom at placement.y, clean product offset within
+        // Move up by 100% (own height) + shadowOffsetPercent to account for shadow padding
+        transform: `translate(-50%, -${100 + shadowOffsetPercent}%)`, 
       }
     };
   };
