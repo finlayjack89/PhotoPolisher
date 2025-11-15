@@ -4,7 +4,18 @@
 LuxSnap is a professional photo editing platform designed for e-commerce and product photography. It uses AI for features like background removal, shadow generation, backdrop positioning, and batch processing to create studio-quality product images. The platform aims to streamline the product photography workflow and offers significant market potential for businesses requiring high-quality visual content.
 
 ## Recent Changes
-**November 15, 2025 - Batch Processing Critical Fixes**
+**November 15, 2025 - Canvas Compositing Architecture Overhaul**
+- Redesigned `computeCompositeLayout()` to exactly match CSS preview behavior using width-first scaling
+- Implemented width-based canvas sizing: `canvasW = shadowW / (1-2p)`, `canvasH = canvasW / aspectRatio`
+- Shadow now occupies (1-2p) of canvas WIDTH (primary constraint), with height scaling naturally
+- Added overflow protection for tall assets that would clip the canvas boundary
+- Letterboxing occurs naturally when shadow aspect ratio differs from target aspect ratio
+- Verified with architect review: Canvas output now matches CSS preview pixel-perfect for all aspect ratios
+- Fixed core issue: CSS reflections (`-webkit-box-reflect`) cannot be captured by `canvas.toBlob()` - now manually drawn on canvas
+- Proper layer compositing order: Backdrop → Shadow (matte only) → Reflection → Clean Product on top
+- Cloudinary shadow contains ONLY shadow mask with transparent product area, requiring separate clean product layer
+
+**November 15, 2025 - Earlier Batch Processing Fixes**
 - Fixed reflection gradient destroying backdrop by isolating reflection compositing to temporary canvas
 - Fixed reflection size/alignment by calculating proper scale factor between clean and shadowed subject dimensions  
 - Removed hardcoded reflection values (0.4/0.5) and now using proper defaults (0.65/0.8) from masterRules
