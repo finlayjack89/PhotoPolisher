@@ -36,9 +36,9 @@ export async function processJob(
     // 2. Add shadow
     const shadowOptions = options.shadow || {
       azimuth: 135,
-      elevation: 45,
-      spread: 10,
-      opacity: 75,
+      elevation: 90,
+      spread: 5,
+      opacity: 50,
     };
 
     console.log(`[Job ${jobId}] Adding drop shadow...`);
