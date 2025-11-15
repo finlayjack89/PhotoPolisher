@@ -81,7 +81,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   
   const [placement, setPlacement] = useState<SubjectPlacement>({
     x: 0.5, // X is always 50%
-    y: 0.99504, // Bottom position (user can override)
+    y: 1.2, // Bottom position (user can override)
     scale: 1.0, 
   });
 
@@ -143,7 +143,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     setBackdropFile(file);
     
     // Set default positioning (user can manually adjust)
-    setPlacement(prev => ({ ...prev, y: 0.99504 }));
+    setPlacement(prev => ({ ...prev, y: 1.2 }));
     
     toast({
       title: source === 'upload' ? "Backdrop Uploaded" : "Backdrop Selected",
