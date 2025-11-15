@@ -47,18 +47,16 @@ export async function apiRequest<T = any>(
 }
 
 export const api = {
-  // --- Original processing endpoints ---
+  // DEPRECATED: Old synchronous background removal endpoints (Nov 14, 2025)
+  // These call /api/remove-backgrounds which blocks Node.js event loop
+  // Replaced with job-based API: createBackgroundRemovalJob + polling
+  /*
   removeBackgrounds: (data: any) => apiRequest('/api/remove-backgrounds', {
     method: 'POST',
     body: JSON.stringify(data),
   }),
 
-  /**
-   * Single-file background removal helper
-   * Converts a File to base64 and calls the removeBackgrounds endpoint
-   */
   removeBackground: async (file: File): Promise<{ success: boolean; images: Array<{ name: string; transparentData: string; size: number; error?: string }> }> => {
-    // Convert File to base64 data URL
     const base64Data = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
@@ -66,7 +64,6 @@ export const api = {
       reader.readAsDataURL(file);
     });
 
-    // Call the removeBackgrounds endpoint with single image
     return apiRequest('/api/remove-backgrounds', {
       method: 'POST',
       body: JSON.stringify({
@@ -77,6 +74,7 @@ export const api = {
       }),
     });
   },
+  */
 
   addDropShadow: (data: any) => apiRequest('/api/add-drop-shadow', {
     method: 'POST',
