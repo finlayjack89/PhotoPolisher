@@ -32,6 +32,7 @@ interface MasterRules {
   placement: SubjectPlacement;
   padding: number;
   aspectRatio: string;
+  numericAspectRatio?: number;  // Pre-calculated numeric ratio for "original" mode
   // TODO: These should be passed in from ProductConfiguration
   shadowOptions?: any; 
   reflectionOptions?: ReflectionOptions;
@@ -82,7 +83,8 @@ const calculateCanvasSize = (
   subjectW: number,
   subjectH: number,
   padding: number,
-  aspectRatio: string
+  aspectRatio: string,
+  numericAspectRatio?: number
 ) => {
   const paddingPercent = padding / 100;
 
@@ -95,7 +97,11 @@ const calculateCanvasSize = (
   if (aspectRatio === '1:1') finalAspectRatio = 1;
   else if (aspectRatio === '4:3') finalAspectRatio = 4 / 3;
   else if (aspectRatio === '3:4') finalAspectRatio = 3 / 4;
-  else finalAspectRatio = paddedW / paddedH; // 'original'
+  else if (aspectRatio === 'original' && numericAspectRatio) {
+    // Use pre-calculated backdrop aspect ratio for "original" mode
+    finalAspectRatio = numericAspectRatio;
+  }
+  else finalAspectRatio = paddedW / paddedH; // Fallback to subject dimensions
 
   // 3. Determine final canvas size
   let canvasW = paddedW;
@@ -278,7 +284,8 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
           width,
           height,
           masterRules.padding,
-          masterRules.aspectRatio
+          masterRules.aspectRatio,
+          masterRules.numericAspectRatio
         );
 
         // --- Step 4: Final Composite (Client-side) ---

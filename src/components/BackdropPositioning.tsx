@@ -46,6 +46,7 @@ interface BackdropPositioningProps {
     placement: SubjectPlacement,
     padding: number,
     aspectRatio: string,
+    numericAspectRatio?: number
   ) => void;
   onBack: () => void;
 }
@@ -171,7 +172,19 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
 
   const handleContinue = () => {
     if (backdrop) {
-      onPositioningComplete(backdrop, placement, masterPadding, masterAspectRatio);
+      // Calculate the numeric aspect ratio for "original" mode
+      let numericAspectRatio: number | undefined;
+      if (masterAspectRatio === 'original' && backdropDimensions.w > 1 && backdropDimensions.h > 1) {
+        numericAspectRatio = backdropDimensions.w / backdropDimensions.h;
+      }
+      
+      onPositioningComplete(
+        backdrop, 
+        placement, 
+        masterPadding, 
+        masterAspectRatio,
+        numericAspectRatio
+      );
     }
   };
 

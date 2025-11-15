@@ -37,6 +37,7 @@ interface ProcessedImages {
   placement?: SubjectPlacement;
   masterPadding?: number;
   masterAspectRatio?: string;
+  numericAspectRatio?: number;
   finalComposited?: Array<{ name: string; compositedData: string; }>;
 }
 
@@ -133,20 +134,25 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
     backdrop: string, 
     placement: SubjectPlacement, 
     masterPadding: number, 
-    masterAspectRatio: string
+    masterAspectRatio: string,
+    numericAspectRatio?: number
   ) => {
     console.log('🎯 Master setup completed');
     console.log(`📊 Backdrop format: ${backdrop?.substring(0, 50)}`);
     console.log(`📐 Placement: ${JSON.stringify(placement)}`);
     console.log(`🎨 Master padding: ${masterPadding}`);
     console.log(`📏 Master aspect ratio: ${masterAspectRatio}`);
+    if (numericAspectRatio) {
+      console.log(`📏 Numeric aspect ratio: ${numericAspectRatio}`);
+    }
     
     setProcessedImages(prev => ({ 
       ...prev, 
       backdrop, 
       placement, 
       masterPadding, 
-      masterAspectRatio 
+      masterAspectRatio,
+      numericAspectRatio
     }));
     
     setCurrentStep('batch-processing');
@@ -232,7 +238,8 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
         masterRules={{
           placement: processedImages.placement,
           padding: processedImages.masterPadding,
-          aspectRatio: processedImages.masterAspectRatio
+          aspectRatio: processedImages.masterAspectRatio,
+          numericAspectRatio: processedImages.numericAspectRatio
         }}
         isPreCut={false}
         onComplete={async (results) => {

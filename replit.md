@@ -4,6 +4,13 @@
 LuxSnap is a professional photo editing platform designed for e-commerce and product photography. It uses AI for features like background removal, shadow generation, backdrop positioning, and batch processing to create studio-quality product images. The platform aims to streamline the product photography workflow and offers significant market potential for businesses requiring high-quality visual content.
 
 ## Recent Changes
+**November 15, 2025 - Batch Processing Critical Fixes**
+- Fixed reflection gradient destroying backdrop by isolating reflection compositing to temporary canvas
+- Fixed reflection size/alignment by calculating proper scale factor between clean and shadowed subject dimensions  
+- Removed hardcoded reflection values (0.4/0.5) and now using proper defaults (0.65/0.8) from masterRules
+- Fixed aspect ratio inconsistency where preview used backdrop dimensions but output used subject dimensions for "original" mode
+- Updated data flow to pass numeric backdrop aspect ratio through workflow for consistent sizing
+- Estimated Cloudinary shadow padding at 1.5x for proper reflection scaling
 **November 15, 2025 - Production Deployment Fix**
 - Fixed critical production deployment issue where app ran in development mode on Replit Autoscale
 - Updated server to detect `REPLIT_DEPLOYMENT=1` environment variable (set by Autoscale)
