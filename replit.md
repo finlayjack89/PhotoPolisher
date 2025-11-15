@@ -4,6 +4,16 @@
 LuxSnap is a professional photo editing platform designed for e-commerce and product photography. It uses AI for features like background removal, shadow generation, backdrop positioning, and batch processing to create studio-quality product images. The platform aims to streamline the product photography workflow and offers significant market potential for businesses requiring high-quality visual content.
 
 ## Recent Changes
+**November 15, 2025 - Preview/Final Render Positioning Alignment Fix**
+- Fixed discrepancy between CSS preview and canvas final render where product appeared higher in final image
+- Root cause: CSS preview positioned clean product directly, while canvas positioned shadowed subject (larger due to drop shadow) at placement.y
+- Solution: CSS preview now calculates shadow offset based on padding multiplier formula matching canvas logic
+- Implemented dynamic spread value sync via WorkflowContext with typed ShadowConfig interface
+- Hardened WorkflowContext hydration to handle legacy localStorage data (null values, corrupted data)
+- Preview now dynamically adjusts positioning based on actual shadow spread value (defaults to 5, updates when user changes settings)
+- Default subject position: y=0.99504 (99.5% from top, essentially bottom with small margin) in BackdropPositioning.tsx line 87
+- CSS transform now uses `translate(-50%, -${100 + shadowOffsetPercent}%)` where shadowOffsetPercent accounts for shadow padding
+
 **November 15, 2025 - Canvas Compositing Architecture Overhaul**
 - Redesigned `computeCompositeLayout()` to exactly match CSS preview behavior using width-first scaling
 - Implemented width-based canvas sizing: `canvasW = shadowW / (1-2p)`, `canvasH = canvasW / aspectRatio`
