@@ -429,31 +429,15 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                       onSpreadChange={setLocalSpread}
                       showTitle={false}
                     />
-                    {livePreviewUrl && (
-                      <div className="mt-4 p-3 bg-muted/50 rounded-lg">
-                        <p className="text-xs text-muted-foreground text-center mb-2">
-                          Live Cloudinary Shadow Preview
-                        </p>
-                        <div className="relative border border-border rounded overflow-hidden bg-checkered flex items-center justify-center" style={{ minHeight: '200px' }}>
-                          {isUploadingPreview ? (
-                            <div className="flex flex-col items-center gap-2">
-                              <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                              <p className="text-xs text-muted-foreground">Uploading...</p>
-                            </div>
-                          ) : (
-                            <img 
-                              src={livePreviewUrl} 
-                              alt="Live shadow preview" 
-                              className="object-contain max-h-[200px]"
-                              crossOrigin="anonymous"
-                            />
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground text-center mt-2">
-                          Adjust sliders to see real-time shadow changes
-                        </p>
-                      </div>
-                    )}
+                    <div className="mt-4 p-3 bg-muted/50 rounded-lg">
+                      <p className="text-xs text-muted-foreground text-center">
+                        {isUploadingPreview 
+                          ? "⏳ Uploading to Cloudinary for live shadow preview..."
+                          : livePreviewUrl 
+                            ? "✨ Shadow preview is now shown on the backdrop positioning preview above"
+                            : "Adjust sliders to customize shadow appearance"}
+                      </p>
+                    </div>
                   </CollapsibleContent>
                 </Collapsible>
               </div>
@@ -547,7 +531,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                     onMouseUp={() => setIsDragging(false)}
                     onMouseLeave={() => setIsDragging(false)}
                   >
-                    {/* Main Subject */}
+                    {/* Main Subject - use Cloudinary shadow preview when available */}
                     <div
                       className={cn(
                         "absolute cursor-grab select-none",
@@ -556,11 +540,18 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                       style={subjectStyles}
                     >
                       <img
-                        src={previewCutout || ''}
+                        src={livePreviewUrl || previewCutout || ''}
                         alt="Product Preview"
                         className="w-full h-auto select-none"
                         draggable={false}
+                        crossOrigin="anonymous"
                       />
+                      {/* Show indicator when displaying shadow preview */}
+                      {livePreviewUrl && (
+                        <div className="absolute top-2 right-2 bg-primary/90 text-primary-foreground px-2 py-1 rounded text-xs font-medium">
+                          Live Shadow Preview
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
