@@ -4,6 +4,17 @@
 LuxSnap is a professional photo editing platform designed for e-commerce and product photography. It uses AI for features like background removal, shadow generation, backdrop positioning, and batch processing to create studio-quality product images. The platform aims to streamline the product photography workflow and offers significant market potential for businesses requiring high-quality visual content.
 
 ## Recent Changes
+**November 16, 2025 - Critical Bug Fixes: Compression & Session Persistence**
+- Fixed compression bug where files under 5MB were inflated to 20MB+ after PNG conversion
+- Root cause: originalSize was captured before PNG conversion (JPEG size), not after (inflated PNG size)
+- Solution: Moved originalSize capture to after PNG conversion in UploadZone.tsx
+- Files now properly compressed: 3MB JPEG → 19MB PNG → 5MB compressed PNG
+- Fixed session persistence bug where old workflow data persisted when starting new uploads
+- Enhanced resetWorkflow() function with logging and error handling in WorkflowContext
+- Added conditional reset in upload handler: only clears previous session if state exists
+- Added reset call in "Back to Home" navigation to ensure clean workflow state
+- Users can now process batches without old files appearing in new sessions
+
 **November 16, 2025 - Backdrop Positioning Preview/Final Render Alignment Fix**
 - Fixed critical positioning bug where CSS preview limited how low users could drag products (floating effect)
 - Preview now perfectly matches final canvas render in both shadow preview and clean cutout modes
