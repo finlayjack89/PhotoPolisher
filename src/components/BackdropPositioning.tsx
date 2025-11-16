@@ -86,7 +86,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   
   const [placement, setPlacement] = useState<SubjectPlacement>({
     x: 0.5, // X is always 50%
-    y: 1., // Bottom position (user can override)
+    y: 1, // Bottom position (user can override)
     scale: 1.0, 
   });
 
