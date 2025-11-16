@@ -22,6 +22,8 @@ import {
   AlertCircle,
   ArrowLeft,
   Loader2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { SubjectPlacement, getImageDimensions } from "@/lib/canvas-utils";
 import { useToast } from "@/hooks/use-toast";
@@ -29,6 +31,9 @@ import { BackdropLibrary } from "@/components/BackdropLibrary";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { useWorkflow } from "@/contexts/WorkflowContext";
+import { ShadowControls } from "@/components/ShadowControls";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { generateCloudinaryPreviewUrl, uploadPreviewToCloudinary } from "@/lib/cloudinary-preview-utils";
 
 // Define the type for a processed subject
 interface ProcessedSubject {
@@ -88,10 +93,27 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const { toast } = useToast();
-  const { state } = useWorkflow();
+  const { state, setShadowConfig } = useWorkflow();
 
   const [subjectDimensions, setSubjectDimensions] = useState({ w: 1, h: 1 });
   const [backdropDimensions, setBackdropDimensions] = useState({ w: 1, h: 1 });
+
+  // Shadow customization state
+  const [isShadowPanelOpen, setIsShadowPanelOpen] = useState(false);
+  const [localAzimuth, setLocalAzimuth] = useState(state.shadowConfig.azimuth);
+  const [localElevation, setLocalElevation] = useState(state.shadowConfig.elevation);
+  const [localSpread, setLocalSpread] = useState(state.shadowConfig.spread);
+
+  // Cloudinary preview state
+  const [cloudinaryPublicId, setCloudinaryPublicId] = useState<string>('');
+  const [cloudinaryCloudName, setCloudinaryCloudName] = useState<string>('');
+  const [livePreviewUrl, setLivePreviewUrl] = useState<string>('');
+  const [isUploadingPreview, setIsUploadingPreview] = useState(false);
+
+  // Update context when shadow params change
+  useEffect(() => {
+    setShadowConfig({ azimuth: localAzimuth, elevation: localElevation, spread: localSpread });
+  }, [localAzimuth, localElevation, localSpread, setShadowConfig]);
 
   // This effect fetches the preview cutout
   useEffect(() => {
@@ -137,6 +159,47 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
       });
     }
   }, [backdrop]);
+
+  // Upload preview to Cloudinary when preview cutout is ready
+  useEffect(() => {
+    if (previewCutout && !cloudinaryPublicId) {
+      const uploadPreview = async () => {
+        setIsUploadingPreview(true);
+        console.log('Uploading preview image to Cloudinary for live shadow preview...');
+        
+        const result = await uploadPreviewToCloudinary(previewCutout);
+        
+        if (result) {
+          console.log('✅ Preview uploaded to Cloudinary:', result.publicId);
+          setCloudinaryPublicId(result.publicId);
+          setCloudinaryCloudName(result.cloudName);
+        } else {
+          toast({
+            title: "Preview Upload Failed",
+            description: "Live shadow preview unavailable",
+            variant: "default"
+          });
+        }
+        
+        setIsUploadingPreview(false);
+      };
+      
+      uploadPreview();
+    }
+  }, [previewCutout, cloudinaryPublicId, toast]);
+
+  // Update Cloudinary preview when shadow params change
+  useEffect(() => {
+    if (cloudinaryPublicId && cloudinaryCloudName) {
+      const previewUrl = generateCloudinaryPreviewUrl(
+        cloudinaryCloudName,
+        cloudinaryPublicId,
+        { azimuth: localAzimuth, elevation: localElevation, spread: localSpread }
+      );
+      console.log('🔄 Updating Cloudinary preview with shadow params:', { localAzimuth, localElevation, localSpread });
+      setLivePreviewUrl(previewUrl);
+    }
+  }, [localAzimuth, localElevation, localSpread, cloudinaryPublicId, cloudinaryCloudName]);
   
   const setBackdropImage = async (file: File, fileUrl: string, source: 'upload' | 'library') => {
     setBackdrop(fileUrl);
@@ -221,8 +284,9 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     // then the clean product sits within it at an offset.
     // We need to replicate this in CSS so the preview matches the final render.
     // 
-    // Read shadow spread from workflow context (defaults to 5 in context initialization)
-    const shadowSpread = state.shadowConfig.spread;
+    // CRITICAL: Use localSpread (live preview value) instead of state.shadowConfig.spread
+    // to keep preview positioning synchronized with Cloudinary preview
+    const shadowSpread = localSpread;
     const paddingMultiplier = Math.max(1.5, 1 + (shadowSpread / 100));
     // The clean product is centered within the shadowed image
     // offsetY = (shadowHeight - cleanHeight) / 2 = cleanHeight * (paddingMultiplier - 1) / 2
@@ -321,6 +385,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                     max={50}
                     min={5}
                     step={1}
+                    data-testid="slider-padding"
                   />
                   <div className="text-xs text-muted-foreground text-center">
                     {masterPadding}% (Space around subject)
@@ -333,6 +398,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                     value={masterAspectRatio}
                     onValueChange={(val) => val && setMasterAspectRatio(val)}
                     className="grid grid-cols-4"
+                    data-testid="toggle-aspect-ratio"
                   >
                     <ToggleGroupItem value="original">Original</ToggleGroupItem>
                     <ToggleGroupItem value="1:1">1:1</ToggleGroupItem>
@@ -340,6 +406,56 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                     <ToggleGroupItem value="3:4">3:4</ToggleGroupItem>
                   </ToggleGroup>
                 </div>
+
+                {/* Shadow Customization Panel */}
+                <Collapsible open={isShadowPanelOpen} onOpenChange={setIsShadowPanelOpen}>
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-between"
+                      data-testid="button-toggle-shadow-panel"
+                    >
+                      <span>Shadow Customization (Live Preview)</span>
+                      {isShadowPanelOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-4">
+                    <ShadowControls
+                      azimuth={localAzimuth}
+                      elevation={localElevation}
+                      spread={localSpread}
+                      onAzimuthChange={setLocalAzimuth}
+                      onElevationChange={setLocalElevation}
+                      onSpreadChange={setLocalSpread}
+                      showTitle={false}
+                    />
+                    {livePreviewUrl && (
+                      <div className="mt-4 p-3 bg-muted/50 rounded-lg">
+                        <p className="text-xs text-muted-foreground text-center mb-2">
+                          Live Cloudinary Shadow Preview
+                        </p>
+                        <div className="relative border border-border rounded overflow-hidden bg-checkered flex items-center justify-center" style={{ minHeight: '200px' }}>
+                          {isUploadingPreview ? (
+                            <div className="flex flex-col items-center gap-2">
+                              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                              <p className="text-xs text-muted-foreground">Uploading...</p>
+                            </div>
+                          ) : (
+                            <img 
+                              src={livePreviewUrl} 
+                              alt="Live shadow preview" 
+                              className="object-contain max-h-[200px]"
+                              crossOrigin="anonymous"
+                            />
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground text-center mt-2">
+                          Adjust sliders to see real-time shadow changes
+                        </p>
+                      </div>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
               </div>
 
               {/* Batch Info */}

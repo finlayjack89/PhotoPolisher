@@ -8,7 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, ArrowLeft, CheckCircle, AlertCircle, Wand2 } from "lucide-react";
+import { Loader2, ArrowLeft, CheckCircle, AlertCircle, Wand2, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api-client";
 import { 
@@ -19,12 +19,15 @@ import {
   type CompositeOptions,
   type ReflectionOptions
 } from "@/lib/canvas-utils";
+import { useWorkflow } from "@/contexts/WorkflowContext";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 // Define the subject type
 interface Subject {
   name: string;
   originalData?: string;
   backgroundRemovedData?: string;
+  shadowedData?: string; // Cached shadowed image from shadow generation step
   size?: number;
   originalSize?: number;
 }
@@ -129,12 +132,27 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
   const [currentStep, setCurrentStep] = useState("Initializing...");
   const [completedImages, setCompletedImages] = useState<ProcessedImage[]>([]);
   const [failedImages, setFailedImages] = useState<FailedImage[]>([]);
+  const [showStaleWarning, setShowStaleWarning] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [processedSubjects, setProcessedSubjects] = useState<Subject[]>(subjects as Subject[]);
   const { toast } = useToast();
+  const { state, isShadowStale, markShadowsGenerated } = useWorkflow();
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const isCancelled = useRef(false);
 
+  // Check for stale shadows on mount
   useEffect(() => {
-    startBatchProcessing();
+    const shadowsAreStale = isShadowStale();
+    if (shadowsAreStale) {
+      setShowStaleWarning(true);
+      toast({
+        title: "Shadow Parameters Changed",
+        description: "Shadow settings have changed since generation. Please regenerate shadows for accurate results.",
+        variant: "destructive",
+      });
+    } else {
+      startBatchProcessing();
+    }
 
     return () => {
       // Clear interval on component unmount
@@ -145,41 +163,163 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
     };
   }, []);
 
+  const handleRegenerateShadows = async () => {
+    setIsRegenerating(true);
+    setShowStaleWarning(false);
+    setProgress(0);
+    setCurrentStep("Regenerating shadows...");
+    
+    try {
+      // Get current shadow config from context
+      const currentShadowConfig = state.shadowConfig;
+      
+      toast({
+        title: "Regenerating Shadows",
+        description: `Applying new shadow settings (azimuth: ${currentShadowConfig.azimuth}°, elevation: ${currentShadowConfig.elevation}°, spread: ${currentShadowConfig.spread}%)`,
+      });
+      
+      // Update masterRules with current shadow config
+      masterRules.shadowOptions = {
+        azimuth: currentShadowConfig.azimuth,
+        elevation: currentShadowConfig.elevation,
+        spread: currentShadowConfig.spread,
+        opacity: currentShadowConfig.opacity || 75
+      };
+      
+      // Actually regenerate shadows using the drop shadow API
+      console.log(`🔄 Regenerating shadows for ${processedSubjects.length} subjects`);
+      
+      // Prepare images for shadow regeneration (use clean cutouts)
+      const imagesToProcess = processedSubjects.map(subject => ({
+        name: subject.name,
+        data: isPreCut 
+          ? subject.originalData || ''
+          : subject.backgroundRemovedData || ''
+      }));
+      
+      setProgress(10);
+      setCurrentStep(`Regenerating shadows for ${imagesToProcess.length} images...`);
+      
+      // Call the drop shadow API
+      const shadowResult = await api.addDropShadow({
+        images: imagesToProcess,
+        azimuth: currentShadowConfig.azimuth,
+        elevation: currentShadowConfig.elevation,
+        spread: currentShadowConfig.spread,
+        opacity: currentShadowConfig.opacity || 75
+      });
+      
+      setProgress(60);
+      
+      if (!shadowResult || !shadowResult.images) {
+        throw new Error('Failed to regenerate shadows - no data returned');
+      }
+      
+      const shadowedImages = shadowResult.images;
+      
+      // Update processed subjects with new shadowed data
+      const updatedSubjects = processedSubjects.map((subject, index) => {
+        const shadowedImage = shadowedImages.find(img => img.name === subject.name);
+        if (shadowedImage && shadowedImage.shadowedData) {
+          return {
+            ...subject,
+            shadowedData: shadowedImage.shadowedData
+          };
+        }
+        return subject;
+      });
+      
+      setProcessedSubjects(updatedSubjects);
+      setProgress(80);
+      
+      console.log(`✅ Successfully regenerated shadows for ${updatedSubjects.length} subjects`);
+      
+      toast({
+        title: "Shadows Regenerated",
+        description: `Successfully updated shadows for ${updatedSubjects.length} images`,
+      });
+      
+      // Mark shadows as successfully generated ONLY after regeneration completes
+      markShadowsGenerated();
+      
+      setProgress(100);
+      setCurrentStep("Shadow regeneration complete. Starting batch processing...");
+      
+      // Now start batch processing with the updated shadowed subjects
+      setTimeout(() => {
+        startBatchProcessing();
+        setIsRegenerating(false);
+      }, 500);
+      
+    } catch (error) {
+      console.error("Failed to regenerate shadows:", error);
+      toast({
+        title: "Regeneration Failed",
+        description: error instanceof Error ? error.message : "Failed to regenerate shadows. Please try again.",
+        variant: "destructive",
+      });
+      setIsRegenerating(false);
+      setShowStaleWarning(true);
+      setProgress(0);
+      setCurrentStep("Shadow regeneration failed");
+    }
+  };
+
   const startBatchProcessing = async () => {
-    setCurrentStep(`Starting ${subjects.length} processing jobs...`);
+    setCurrentStep(`Starting ${processedSubjects.length} processing jobs...`);
     const newJobs: Job[] = [];
 
-    // Use shadow and reflection options from masterRules if they exist,
-    // otherwise use defaults
-    const shadowOptions = masterRules.shadowOptions || { azimuth: 135, elevation: 45, spread: 10, opacity: 75 };
+    // Use shadow options from masterRules if they exist,
+    // otherwise use current config from context
+    const shadowOptions = masterRules.shadowOptions || {
+      azimuth: state.shadowConfig.azimuth,
+      elevation: state.shadowConfig.elevation,
+      spread: state.shadowConfig.spread,
+      opacity: state.shadowConfig.opacity || 75
+    };
     const reflectionOptions = masterRules.reflectionOptions || { opacity: 0.65, falloff: 0.8 };
 
     // Store the options back in masterRules
     masterRules.shadowOptions = shadowOptions;
     masterRules.reflectionOptions = reflectionOptions;
 
-    for (const subject of subjects) {
+    // Use processedSubjects which now contains cached shadowed data if regenerated
+    for (const subject of processedSubjects) {
       if (isCancelled.current) return;
-      const name = (subject as File).name || (subject as Subject).name;
+      const name = subject.name;
       try {
         // --- Step 1: Get Cutout Data ---
         const cleanCutoutData = isPreCut
-          ? await fileToDataUrl(subject as File)
-          : (subject as Subject).backgroundRemovedData || '';
+          ? subject.originalData || ''
+          : subject.backgroundRemovedData || '';
 
         if (!cleanCutoutData) throw new Error("Missing cutout data");
 
-        // --- Step 2: Start Async Job ---
-        const { jobId } = await api.processImage(cleanCutoutData, {
-          shadow: shadowOptions,
-        });
+        // --- Step 2: Check if we have cached shadowed data ---
+        if (subject.shadowedData) {
+          // Use cached shadowed data - create a pseudo-job that's already "completed"
+          console.log(`✅ Using cached shadowed data for ${name}`);
+          newJobs.push({
+            name,
+            jobId: `cached-${Date.now()}-${Math.random()}`, // Fake job ID
+            cleanCutoutData,
+            status: 'completed',
+            final_image_url: subject.shadowedData, // Use cached shadowed data
+          });
+        } else {
+          // No cached data - create actual shadow job
+          console.log(`🔄 Creating shadow job for ${name}`);
+          const { jobId } = await api.processImage(cleanCutoutData, {
+            shadow: shadowOptions,
+          });
 
-        newJobs.push({
-          name,
-          jobId,
-          cleanCutoutData,
-          status: 'pending',
-        });
+          newJobs.push({
+            name,
+            jobId,
+            cleanCutoutData,
+            status: 'pending',
+          });
+        }
 
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
@@ -326,6 +466,11 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
     }
 
     setCurrentStep("Batch processing complete!");
+    
+    // Mark shadows as successfully generated with current config
+    // This ensures the config is in sync and prevents stale warnings
+    markShadowsGenerated();
+    
     // Wait 1 sec before transitioning to gallery
     setTimeout(() => {
       if (!isCancelled.current) {
@@ -351,10 +496,64 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
             <CardTitle className="text-2xl">Processing Batch</CardTitle>
           </div>
           <p className="text-muted-foreground">
-            Please wait while we generate your images...
+            {showStaleWarning ? "Shadow settings have changed" : "Please wait while we generate your images..."}
           </p>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* Stale Shadow Warning */}
+          {showStaleWarning && (
+            <Alert variant="destructive" data-testid="alert-stale-shadows">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Shadow Parameters Changed</AlertTitle>
+              <AlertDescription className="space-y-3">
+                <p>
+                  The shadow settings have been modified since shadows were last generated. 
+                  To ensure your final images match the preview, you need to regenerate shadows with the current settings.
+                </p>
+                <div className="flex flex-col gap-2 mt-4">
+                  <div className="text-sm space-y-1">
+                    <p className="font-medium">Current Shadow Settings:</p>
+                    <ul className="list-disc list-inside ml-2 space-y-0.5">
+                      <li>Azimuth: {state.shadowConfig.azimuth}°</li>
+                      <li>Elevation: {state.shadowConfig.elevation}°</li>
+                      <li>Spread: {state.shadowConfig.spread}%</li>
+                    </ul>
+                  </div>
+                  <Button 
+                    onClick={handleRegenerateShadows}
+                    disabled={isRegenerating}
+                    className="w-full mt-2"
+                    data-testid="button-regenerate-shadows"
+                  >
+                    {isRegenerating ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Regenerating...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Regenerate Shadows & Continue
+                      </>
+                    )}
+                  </Button>
+                  <Button 
+                    variant="outline"
+                    onClick={onBack}
+                    className="w-full"
+                    data-testid="button-back-from-warning"
+                  >
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Go Back to Adjust Settings
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Processing UI (only shown when not showing warning) */}
+          {!showStaleWarning && (
+            <>
           <div className="space-y-4">
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground" data-testid="text-current-step">{currentStep}</span>
@@ -399,6 +598,8 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Setup (This will cancel the batch)
           </Button>
+          </>
+          )}
         </CardContent>
       </Card>
     </div>

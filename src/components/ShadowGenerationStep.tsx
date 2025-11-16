@@ -2,14 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Slider } from "@/components/ui/slider";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Loader2, Sparkles, SkipForward, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api-client";
 import { generateReflections } from "@/lib/reflection-utils";
 import { useWorkflow } from "@/contexts/WorkflowContext";
+import { ShadowControls } from "@/components/ShadowControls";
+import { generateCloudinaryPreviewUrl, uploadPreviewToCloudinary } from "@/lib/cloudinary-preview-utils";
 
 interface ShadowGenerationStepProps {
   images: Array<{
@@ -37,7 +36,7 @@ export const ShadowGenerationStep: React.FC<ShadowGenerationStepProps> = ({
   const [previewAfter, setPreviewAfter] = useState<string>('');
   const [shadowedResults, setShadowedResults] = useState<Array<{ name: string; shadowedData: string }>>([]);
   const { toast } = useToast();
-  const { state, setShadowConfig } = useWorkflow();
+  const { state, setShadowConfig, markShadowsGenerated } = useWorkflow();
   
   // Shadow parameters - initialize from context (always has defaults)
   const [azimuth, setAzimuth] = useState(state.shadowConfig.azimuth);
@@ -58,61 +57,42 @@ export const ShadowGenerationStep: React.FC<ShadowGenerationStepProps> = ({
   useEffect(() => {
     if (images.length > 0) {
       setPreviewBefore(images[0].data);
-      uploadPreviewToCloudinary();
+      const uploadPreview = async () => {
+        setIsUploadingPreview(true);
+        console.log('Uploading preview image to Cloudinary...');
+
+        const result = await uploadPreviewToCloudinary(images[0].data);
+        
+        if (result) {
+          console.log('✅ Preview uploaded to Cloudinary:', result.publicId);
+          setCloudinaryPublicId(result.publicId);
+          setCloudinaryCloudName(result.cloudName);
+        } else {
+          toast({
+            title: "Preview Upload Failed",
+            description: "Using local preview instead",
+            variant: "default"
+          });
+        }
+        
+        setIsUploadingPreview(false);
+      };
+      
+      uploadPreview();
     }
-  }, [images]);
+  }, [images, toast]);
 
   useEffect(() => {
     if (cloudinaryPublicId && cloudinaryCloudName) {
-      updateLivePreview();
+      const previewUrl = generateCloudinaryPreviewUrl(
+        cloudinaryCloudName,
+        cloudinaryPublicId,
+        { azimuth, elevation, spread }
+      );
+      console.log('🔄 Updating live preview with shadow params:', { azimuth, elevation, spread });
+      setLivePreviewUrl(previewUrl);
     }
   }, [azimuth, elevation, spread, cloudinaryPublicId, cloudinaryCloudName]);
-
-  const uploadPreviewToCloudinary = async () => {
-    if (images.length === 0) return;
-    
-    setIsUploadingPreview(true);
-    console.log('Uploading preview image to Cloudinary...');
-
-    try {
-      const data = await api.addDropShadow({ 
-        uploadPreview: true,
-        image: images[0]
-      });
-
-      if (data?.publicId && data?.cloudName) {
-        console.log('✅ Preview uploaded to Cloudinary:', data.publicId);
-        setCloudinaryPublicId(data.publicId);
-        setCloudinaryCloudName(data.cloudName);
-      } else {
-        throw new Error('No publicId returned from preview upload');
-      }
-    } catch (error) {
-      console.error('Preview upload failed:', error);
-      toast({
-        title: "Preview Upload Failed",
-        description: "Using local preview instead",
-        variant: "default"
-      });
-    } finally {
-      setIsUploadingPreview(false);
-    }
-  };
-
-  const updateLivePreview = () => {
-    // Calculate padding multiplier - minimum 1.5x canvas size, scales with spread
-    // For spread=5: 1.5x, for spread=50: 1.5x (max of formula), for spread=100: 2x
-    const paddingMultiplier = Math.max(1.5, 1 + (spread / 100));
-    console.log(`Using padding multiplier: ${paddingMultiplier}x for spread: ${spread}`);
-    
-    // Use c_lpad (letterbox pad) with multiplication syntax - VALID Cloudinary syntax
-    // w_iw_mul_X multiplies the original width by X (this actually works!)
-    const transformUrl = `https://res.cloudinary.com/${cloudinaryCloudName}/image/upload/c_lpad,w_iw_mul_${paddingMultiplier},h_ih_mul_${paddingMultiplier},b_transparent/e_dropshadow:azimuth_${azimuth};elevation_${elevation};spread_${spread}/${cloudinaryPublicId}.png`;
-    const timestamp = Date.now();
-    console.log('🔄 Updating live preview:', transformUrl);
-    console.log('Shadow params:', { azimuth, elevation, spread, paddingMultiplier });
-    setLivePreviewUrl(`${transformUrl}?t=${timestamp}`);
-  };
 
   const generateShadows = async () => {
     setIsProcessing(true);
@@ -161,6 +141,9 @@ export const ShadowGenerationStep: React.FC<ShadowGenerationStepProps> = ({
 
         setProgress(100);
         setIsProcessing(false);
+        
+        // Mark shadows as generated in workflow context
+        markShadowsGenerated();
         
         // Prepare clean subjects for CSS reflection
         const cleanSubjects = images.map(img => ({
@@ -225,92 +208,15 @@ export const ShadowGenerationStep: React.FC<ShadowGenerationStepProps> = ({
             {!isProcessing && !previewAfter && (
               <>
                 <div className="space-y-6">
-                  <div className="bg-muted/50 rounded-lg p-6 space-y-4">
-                    <div className="flex items-start gap-3">
-                      <Sparkles className="h-5 w-5 text-primary mt-1" />
-                      <div className="flex-1">
-                        <h3 className="font-semibold mb-4">Shadow Configuration</h3>
-                        
-                        {/* Azimuth Control */}
-                        <div className="space-y-3 mb-4">
-                          <Label htmlFor="azimuth" className="text-sm font-medium">
-                            Azimuth: {azimuth}° (shadow direction)
-                          </Label>
-                          <div className="flex gap-3 items-center">
-                            <Slider
-                              id="azimuth"
-                              min={0}
-                              max={360}
-                              step={1}
-                              value={[azimuth]}
-                              onValueChange={(value) => setAzimuth(value[0])}
-                              className="flex-1"
-                            />
-                            <Input
-                              type="number"
-                              value={azimuth}
-                              onChange={(e) => setAzimuth(Math.max(0, Math.min(360, parseInt(e.target.value) || 0)))}
-                              className="w-20"
-                              min={0}
-                              max={360}
-                            />
-                          </div>
-                        </div>
-
-                        {/* Elevation Control */}
-                        <div className="space-y-3 mb-4">
-                          <Label htmlFor="elevation" className="text-sm font-medium">
-                            Elevation: {elevation}° (light angle)
-                          </Label>
-                          <div className="flex gap-3 items-center">
-                            <Slider
-                              id="elevation"
-                              min={0}
-                              max={90}
-                              step={1}
-                              value={[elevation]}
-                              onValueChange={(value) => setElevation(value[0])}
-                              className="flex-1"
-                            />
-                            <Input
-                              type="number"
-                              value={elevation}
-                              onChange={(e) => setElevation(Math.max(0, Math.min(90, parseInt(e.target.value) || 0)))}
-                              className="w-20"
-                              min={0}
-                              max={90}
-                            />
-                          </div>
-                        </div>
-
-                        {/* Spread Control */}
-                        <div className="space-y-3">
-                          <Label htmlFor="spread" className="text-sm font-medium">
-                            Spread: {spread} (shadow softness)
-                          </Label>
-                          <div className="flex gap-3 items-center">
-                            <Slider
-                              id="spread"
-                              min={0}
-                              max={100}
-                              step={1}
-                              value={[spread]}
-                              onValueChange={(value) => setSpread(value[0])}
-                              className="flex-1"
-                            />
-                            <Input
-                              type="number"
-                              value={spread}
-                              onChange={(e) => setSpread(Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
-                              className="w-20"
-                              min={0}
-                              max={100}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  <ShadowControls
+                    azimuth={azimuth}
+                    elevation={elevation}
+                    spread={spread}
+                    onAzimuthChange={setAzimuth}
+                    onElevationChange={setElevation}
+                    onSpreadChange={setSpread}
+                    showTitle={true}
+                  />
 
                   {/* Live Preview */}
                   <div className="space-y-3">

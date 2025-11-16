@@ -21,6 +21,9 @@ interface WorkflowState {
   selectedBackdropId: string | null;
   positioning: { x: number; y: number; scale: number } | null;
   shadowConfig: ShadowConfig;
+  generatedShadowConfig: ShadowConfig | null;
+  shadowVersion: number;
+  shadowsGenerated: boolean;
   reflectionConfig: any;
   batchId: string | null;
 }
@@ -35,6 +38,8 @@ interface WorkflowContextType {
   setSelectedBackdropId: (id: string | null) => void;
   setPositioning: (positioning: WorkflowState['positioning']) => void;
   setShadowConfig: (config: Partial<ShadowConfig>) => void;
+  markShadowsGenerated: () => void;
+  isShadowStale: () => boolean;
   setReflectionConfig: (config: any) => void;
   setBatchId: (id: string | null) => void;
   resetWorkflow: () => void;
@@ -61,6 +66,9 @@ const initialState: WorkflowState = {
   selectedBackdropId: null,
   positioning: null,
   shadowConfig: DEFAULT_SHADOW_CONFIG,
+  generatedShadowConfig: null,
+  shadowVersion: 0,
+  shadowsGenerated: false,
   reflectionConfig: null,
   batchId: null,
 };
@@ -156,6 +164,34 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const markShadowsGenerated = useCallback(() => {
+    setState((prev) => ({ 
+      ...prev, 
+      shadowsGenerated: true,
+      shadowVersion: prev.shadowVersion + 1,
+      // Store current shadowConfig as the generated config
+      generatedShadowConfig: { ...prev.shadowConfig }
+    }));
+  }, []);
+
+  const isShadowStale = useCallback((): boolean => {
+    // If shadows were never generated, they can't be stale
+    if (!state.shadowsGenerated || !state.generatedShadowConfig) {
+      return false;
+    }
+    
+    // Compare current shadowConfig with the config at generation time
+    // Shadows are stale if azimuth, elevation, or spread differ
+    const current = state.shadowConfig;
+    const generated = state.generatedShadowConfig;
+    
+    return (
+      current.azimuth !== generated.azimuth ||
+      current.elevation !== generated.elevation ||
+      current.spread !== generated.spread
+    );
+  }, [state.shadowsGenerated, state.generatedShadowConfig, state.shadowConfig]);
+
   const setReflectionConfig = useCallback((config: any) => {
     setState((prev) => ({ ...prev, reflectionConfig: config }));
   }, []);
@@ -202,6 +238,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setSelectedBackdropId,
     setPositioning,
     setShadowConfig,
+    markShadowsGenerated,
+    isShadowStale,
     setReflectionConfig,
     setBatchId,
     resetWorkflow,
@@ -218,6 +256,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setSelectedBackdropId,
     setPositioning,
     setShadowConfig,
+    markShadowsGenerated,
+    isShadowStale,
     setReflectionConfig,
     setBatchId,
     resetWorkflow,
