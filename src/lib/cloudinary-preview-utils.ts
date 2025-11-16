@@ -43,7 +43,7 @@ export function generateCloudinaryPreviewUrl(
  */
 export async function uploadPreviewToCloudinary(
   imageData: string,
-  uploadEndpoint: string = '/api/drop-shadow'
+  uploadEndpoint: string = '/api/add-drop-shadow'
 ): Promise<{ publicId: string; cloudName: string } | null> {
   try {
     const response = await fetch(uploadEndpoint, {
