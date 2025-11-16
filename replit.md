@@ -4,6 +4,16 @@
 LuxSnap is a professional photo editing platform designed for e-commerce and product photography. It uses AI for features like background removal, shadow generation, backdrop positioning, and batch processing to create studio-quality product images. The platform aims to streamline the product photography workflow and offers significant market potential for businesses requiring high-quality visual content.
 
 ## Recent Changes
+**November 16, 2025 - Backdrop Positioning Preview/Final Render Alignment Fix**
+- Fixed critical positioning bug where CSS preview limited how low users could drag products (floating effect)
+- Preview now perfectly matches final canvas render in both shadow preview and clean cutout modes
+- Implemented conditional transform logic: shadow preview uses bottom-edge alignment, clean cutout applies offset
+- Shadow preview mode: `translate(-50%, -100%)` anchors shadow bottom at placement.y exactly as canvas does
+- Clean cutout mode: `translate(-50%, -${100 + shadowOffsetPercent}%)` simulates product position within shadow container
+- Users can now drag products to true bottom edge (y=1) without artificial limitations
+- Full range of vertical motion restored: top (y=0), middle (y=0.5), bottom (y=1) all work correctly
+- Both preview modes achieve pixel-perfect alignment with final rendered output
+
 **November 16, 2025 - Intelligent Auto-Deskew System**
 - Implemented sophisticated auto-straightening feature for tilted product images with robust baseline detection
 - Added morphological operations (closing/opening radius 3px/1px) to smooth bumps and filter thin accessories
