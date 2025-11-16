@@ -4,6 +4,22 @@
 LuxSnap is a professional photo editing platform designed for e-commerce and product photography. It uses AI for features like background removal, shadow generation, backdrop positioning, and batch processing to create studio-quality product images. The platform aims to streamline the product photography workflow and offers significant market potential for businesses requiring high-quality visual content.
 
 ## Recent Changes
+**November 16, 2025 - Intelligent Auto-Deskew System**
+- Implemented sophisticated auto-straightening feature for tilted product images with robust baseline detection
+- Added morphological operations (closing/opening radius 3px/1px) to smooth bumps and filter thin accessories
+- Connected component analysis removes straps, tags, and overhanging items (<8% area threshold)
+- Adaptive bottom-band sampling (8% of height) with center-weighted points (cosine weighting)
+- RANSAC line fitting (200 iterations, 2.5px threshold) robust to outliers and noise
+- Confidence scoring combines inlier ratio (60% weight) and residual error (40% weight)
+- Auto-skip when confidence <75% or angle >10° to avoid incorrect rotations on curved/round products
+- New workflow step 'auto-deskew' between background-removal and positioning (sequential processing)
+- Toggleable UI checkbox in WorkflowPage header (default: ON) - "Auto-straighten products (recommended for flat-base items)"
+- Stores both original and rotated versions in WorkflowContext for downstream flexibility
+- BatchProcessingStep/BackdropPositioning prefer deskewed images when available, fallback to original
+- Backward compatible with legacy processedSubjects missing rotation metadata
+- Toast notifications inform users of rotation decisions ("Straightened by +2.1°" or skip reason)
+- Handles edge cases: bumpy bases (shoe treads), overhanging accessories (purse straps), asymmetric products
+
 **November 16, 2025 - Integrated Shadow Preview into Backdrop Positioning**
 - Integrated Cloudinary shadow preview directly into main backdrop positioning preview for true WYSIWYG editing
 - Removed redundant separate shadow preview panel - users now see shadowed product on actual backdrop in real-time

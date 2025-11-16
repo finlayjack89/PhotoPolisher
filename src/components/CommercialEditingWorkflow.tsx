@@ -4,6 +4,7 @@ import { BackdropPositioning } from './BackdropPositioning';
 import { GalleryPreview } from './GalleryPreview';
 import { ImagePreviewStep } from './ImagePreviewStep';
 import { BackgroundRemovalStep } from './BackgroundRemovalStep';
+import { AutoDeskewStep } from './AutoDeskewStep';
 import { BatchProcessingStep } from './BatchProcessingStep';
 import { SubjectPlacement } from "@/lib/canvas-utils";
 import { useToast } from "@/hooks/use-toast";
@@ -16,7 +17,7 @@ interface CommercialEditingWorkflowProps {
   onBack: () => void;
 }
 
-type WorkflowStep = 'analysis' | 'background-removal' | 'precut-positioning' | 'positioning' | 'batch-processing' | 'complete';
+type WorkflowStep = 'analysis' | 'background-removal' | 'auto-deskew' | 'precut-positioning' | 'positioning' | 'batch-processing' | 'complete';
 
 interface FileWithOriginalSize extends File {
   originalSize?: number;
@@ -127,7 +128,12 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
       backgroundRemoved: backgroundRemovedImages
     }));
     
-    setCurrentStep('positioning'); 
+    // Check if auto-deskew is enabled
+    if (workflowContext.state.autoDeskewEnabled) {
+      setCurrentStep('auto-deskew');
+    } else {
+      setCurrentStep('positioning');
+    }
   };
 
   const handlePositioningComplete = (
@@ -178,6 +184,20 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
         onProcessingComplete={handleBackgroundRemovalComplete}
         onContinue={handleBackgroundRemovalComplete}
         onBack={onBack}
+      />
+    );
+  }
+
+  if (currentStep === 'auto-deskew') {
+    return (
+      <AutoDeskewStep
+        subjects={processedSubjects}
+        onComplete={(deskewedSubjects) => {
+          setProcessedSubjects(deskewedSubjects);
+          setCurrentStep('positioning');
+        }}
+        onSkip={() => setCurrentStep('positioning')}
+        onBack={() => setCurrentStep('background-removal')}
       />
     );
   }

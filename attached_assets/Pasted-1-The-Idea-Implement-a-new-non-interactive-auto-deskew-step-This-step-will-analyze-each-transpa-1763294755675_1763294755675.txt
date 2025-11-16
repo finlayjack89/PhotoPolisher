@@ -1,0 +1,65 @@
+1. The Idea
+Implement a new, non-interactive "auto-deskew" step. This step will analyze each transparent product image, calculate its baseline angle, and automatically apply a minor rotation (e.g., +2.1° or -1.5°) to ensure the subject's base is perfectly horizontal.
+
+2. The Need (Why)
+This is critical for realistic reflections. A tilted subject creates a skewed, unnatural reflection. By auto-straightening every image, we create a consistent, professional baseline before shadows or reflections are ever generated. This feature will replace the two confusing manual rotation UIs that currently exist.
+
+3. New Workflow Placement
+We will modify the CommercialEditingWorkflow.tsx state machine:
+
+Remove the 'rotation' and 'precut-rotation' steps from the WorkflowStep type.
+
+Add new states: 'auto-deskew' and 'precut-auto-deskew'.
+
+The new flow for standard images will be:
+
+'background-removal' -> (triggers handleBackgroundRemovalComplete) -> transitions to 'auto-deskew' (new loading step) -> transitions to 'shadow-generation'.
+
+The new flow for pre-cut images will be:
+
+'analysis' -> (detects pre-cut) -> transitions to 'precut-auto-deskew' (new loading step) -> transitions to 'shadow-generation'.
+
+4. Implementation Details (Optimal Depth)
+To implement this, you should:
+
+Create New Utility: src/lib/image-deskew-utils.ts
+
+This file needs a core function: autoDeskewSubject(imageDataUrl: string).
+
+This function must load the image onto a canvas and read its ImageData.
+
+It needs to scan the pixel data (alpha channel) to find the lowest non-transparent (x, y) coordinate on the left half of the image and the right half.
+
+From these two points, it must calculate the angle of the line and return the number of degrees to rotate (e.g., 1.75).
+
+It should handle images where a baseline can't be found (e.g., return 0).
+
+Enhance Rotation Utility: src/lib/image-rotation-utils.ts
+
+This file currently only has 90° rotation logic.
+
+Add a new function: rotateImageByAngle(imageDataUrl: string, degrees: number).
+
+This function must use canvas ctx.rotate(rads) to apply the precise rotation and return a new data URL of a canvas that's properly sized to fit the rotated image.
+
+Update Workflow Controller: src/components/CommercialEditingWorkflow.tsx
+
+Add the new WorkflowStep types as described above.
+
+Update handleBackgroundRemovalComplete to transition to 'auto-deskew'.
+
+Update the analyzeImages function's pre-cut logic to transition to 'precut-auto-deskew'.
+
+Add a useEffect to trigger a new runAutoDeskew function when currentStep is 'auto-deskew' or 'precut-auto-deskew'.
+
+This runAutoDeskew function should loop through all subjects, call autoDeskewSubject, and if an angle is returned, call rotateImageByAngle to get the new data URL.
+
+It must update the processedSubjects (or processedImages.backgroundRemoved) state with the new straightened image data URLs.
+
+Crucially, remove the render logic for currentStep === 'rotation' and currentStep === 'precut-rotation' and replace them with a simple loading/spinner UI for the new 'auto-deskew' steps.
+
+Cleanup Positioning UI: src/components/BackdropPositioning.tsx
+
+Remove the "Subject Orientation" controls (the RotateCcw and RotateCw buttons).
+
+Remove the rotateSubject function. This manual step is no longer necessary, as the image will already be perfectly straight.

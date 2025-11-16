@@ -40,8 +40,12 @@ interface ProcessedSubject {
   name: string;
   originalData: string;
   backgroundRemovedData: string;
+  deskewedData?: string; // Rotated version with background removed
+  cleanDeskewedData?: string; // Rotated version without effects
   size: number;
   originalSize?: number;
+  rotationAngle?: number;
+  rotationConfidence?: number;
 }
 
 interface BackdropPositioningProps {
@@ -133,7 +137,21 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         if (isPreCut) {
           cutoutData = await fileToDataUrl(firstSubject as File);
         } else {
-          cutoutData = (firstSubject as ProcessedSubject).backgroundRemovedData;
+          const subject = firstSubject as ProcessedSubject;
+          // Only use deskewed data if rotation confidence >= 75
+          const wasRotated = subject.rotationConfidence && subject.rotationConfidence >= 75;
+          cutoutData = wasRotated && subject.deskewedData 
+            ? subject.deskewedData 
+            : subject.backgroundRemovedData;
+          
+          if (wasRotated && subject.deskewedData) {
+            console.log(`✅ Preview using rotated image for ${subject.name} (confidence: ${subject.rotationConfidence}%)`);
+          } else {
+            const reason = subject.rotationConfidence !== undefined && subject.rotationConfidence < 75 
+              ? `low confidence (${subject.rotationConfidence}%)` 
+              : 'no rotation available';
+            console.log(`📐 Preview using original image for ${subject.name} (${reason})`);
+          }
         }
 
         if (!cutoutData) throw new Error("Cutout data is empty.");

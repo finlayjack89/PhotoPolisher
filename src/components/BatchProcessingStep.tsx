@@ -27,9 +27,13 @@ interface Subject {
   name: string;
   originalData?: string;
   backgroundRemovedData?: string;
+  deskewedData?: string; // Rotated version with background removed
+  cleanDeskewedData?: string; // Rotated version without effects
   shadowedData?: string; // Cached shadowed image from shadow generation step
   size?: number;
   originalSize?: number;
+  rotationAngle?: number;
+  rotationConfidence?: number;
 }
 
 interface MasterRules {
@@ -189,13 +193,26 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
       // Actually regenerate shadows using the drop shadow API
       console.log(`🔄 Regenerating shadows for ${processedSubjects.length} subjects`);
       
-      // Prepare images for shadow regeneration (use clean cutouts)
-      const imagesToProcess = processedSubjects.map(subject => ({
-        name: subject.name,
-        data: isPreCut 
-          ? subject.originalData || ''
-          : subject.backgroundRemovedData || ''
-      }));
+      // Prepare images for shadow regeneration (prefer deskewed versions if rotation was applied)
+      const imagesToProcess = processedSubjects.map(subject => {
+        // Only use deskewed data if rotation confidence >= 75
+        const wasRotated = subject.rotationConfidence && subject.rotationConfidence >= 75;
+        const data = isPreCut 
+          ? (wasRotated && subject.cleanDeskewedData) || subject.originalData || ''
+          : (wasRotated && subject.deskewedData) || subject.backgroundRemovedData || '';
+        
+        // Log which version is being used for shadow regeneration
+        if (wasRotated && (subject.cleanDeskewedData || subject.deskewedData)) {
+          console.log(`🔄 Using rotated image for ${subject.name} (rotation applied with confidence: ${subject.rotationConfidence}%)`);
+        } else {
+          const reason = subject.rotationConfidence !== undefined && subject.rotationConfidence < 75 
+            ? `low confidence (${subject.rotationConfidence}%)` 
+            : 'no rotation data available';
+          console.log(`📐 Using original image for ${subject.name} (${reason})`);
+        }
+        
+        return { name: subject.name, data };
+      });
       
       setProgress(10);
       setCurrentStep(`Regenerating shadows for ${imagesToProcess.length} images...`);
@@ -288,10 +305,26 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
       if (isCancelled.current) return;
       const name = subject.name;
       try {
-        // --- Step 1: Get Cutout Data ---
+        // --- Step 1: Get Cutout Data (prefer deskewed versions if rotation was applied) ---
+        // Only use deskewed data if rotation confidence >= 75
+        const wasRotated = subject.rotationConfidence && subject.rotationConfidence >= 75;
         const cleanCutoutData = isPreCut
-          ? subject.originalData || ''
-          : subject.backgroundRemovedData || '';
+          ? (wasRotated && subject.cleanDeskewedData) || subject.originalData || ''
+          : (wasRotated && subject.deskewedData) || subject.backgroundRemovedData || '';
+
+        // Log which version is being used
+        if (wasRotated) {
+          if (isPreCut && subject.cleanDeskewedData) {
+            console.log(`✅ Using rotated pre-cut image for ${name} (confidence: ${subject.rotationConfidence}%)`);
+          } else if (!isPreCut && subject.deskewedData) {
+            console.log(`✅ Using rotated cutout for ${name} (confidence: ${subject.rotationConfidence}%)`);
+          }
+        } else {
+          const reason = subject.rotationConfidence !== undefined && subject.rotationConfidence < 75 
+            ? `low confidence (${subject.rotationConfidence}%)` 
+            : 'no rotation data available';
+          console.log(`📐 Using original image for ${name} (${reason})`);
+        }
 
         if (!cleanCutoutData) throw new Error("Missing cutout data");
 

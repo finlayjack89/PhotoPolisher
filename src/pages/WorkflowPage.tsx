@@ -4,6 +4,7 @@ import { useEffect, useMemo } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { CommercialEditingWorkflow } from '@/components/CommercialEditingWorkflow';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { ArrowLeft, Home, Loader2, Scissors, Save, RefreshCw } from 'lucide-react';
 import { createBackgroundRemovalJob, getBackgroundRemovalJobStatus, createBatch, queryClient } from '@/lib/api-client';
 import { useToast } from '@/hooks/use-toast';
@@ -16,7 +17,7 @@ type WorkflowStep = 'upload' | 'remove-bg' | 'position' | 'finalize';
 const WorkflowPage = () => {
   const { step } = useParams<{ step: WorkflowStep }>();
   const navigate = useNavigate();
-  const { state, files, hasMissingFiles, setStep, setProcessedSubjects, setBatchId } = useWorkflow();
+  const { state, files, hasMissingFiles, setStep, setProcessedSubjects, setBatchId, setAutoDeskewEnabled } = useWorkflow();
   const { toast } = useToast();
 
   useEffect(() => {
@@ -169,29 +170,49 @@ const WorkflowPage = () => {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border/50 bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={handleBack}
-              data-testid="button-back"
-            >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={handleHome}
-              data-testid="button-home"
-            >
-              <Home className="h-4 w-4 mr-2" />
-              Home
-            </Button>
+        <div className="container mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={handleBack}
+                data-testid="button-back"
+              >
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={handleHome}
+                data-testid="button-home"
+              >
+                <Home className="h-4 w-4 mr-2" />
+                Home
+              </Button>
+            </div>
+            <div className="text-sm text-muted-foreground">
+              Step: {step}
+            </div>
           </div>
-          <div className="text-sm text-muted-foreground">
-            Step: {step}
+          
+          {/* Auto-straighten toggle */}
+          <div className="mt-3 flex items-center space-x-2">
+            <Checkbox
+              id="auto-deskew-toggle"
+              checked={state.autoDeskewEnabled}
+              onCheckedChange={(checked) => setAutoDeskewEnabled(checked === true)}
+              disabled={removeBackgroundMutation.isPending || createBatchMutation.isPending}
+              data-testid="checkbox-auto-deskew"
+            />
+            <label
+              htmlFor="auto-deskew-toggle"
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+              data-testid="label-auto-deskew"
+            >
+              Auto-straighten products (recommended for flat-base items)
+            </label>
           </div>
         </div>
       </header>

@@ -17,7 +17,12 @@ interface WorkflowState {
     name?: string;
     backgroundRemovedData?: string;
     originalData?: string;
+    deskewedData?: string | null;
+    cleanDeskewedData?: string | null;
+    rotationAngle?: number;
+    rotationConfidence?: number;
   }>;
+  autoDeskewEnabled: boolean;
   selectedBackdropId: string | null;
   positioning: { x: number; y: number; scale: number } | null;
   shadowConfig: ShadowConfig;
@@ -46,6 +51,7 @@ interface WorkflowContextType {
   addUploadedFile: (fileId: string, file: File) => void;
   getUploadedFile: (fileId: string) => File | null;
   getAllUploadedFiles: () => File[];
+  setAutoDeskewEnabled: (enabled: boolean) => void;
 }
 
 const WorkflowContext = createContext<WorkflowContextType | undefined>(undefined);
@@ -71,6 +77,7 @@ const initialState: WorkflowState = {
   shadowsGenerated: false,
   reflectionConfig: null,
   batchId: null,
+  autoDeskewEnabled: true,
 };
 
 export function WorkflowProvider({ children }: { children: ReactNode }) {
@@ -218,6 +225,10 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     return Array.from(uploadedFilesRef.current.values());
   }, []);
 
+  const setAutoDeskewEnabled = useCallback((enabled: boolean) => {
+    setState((prev) => ({ ...prev, autoDeskewEnabled: enabled }));
+  }, []);
+
   // Memoize files and hasMissingFiles for stable references
   // This prevents infinite render loops in consuming components
   const files = useMemo(() => {
@@ -246,6 +257,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     addUploadedFile,
     getUploadedFile,
     getAllUploadedFiles,
+    setAutoDeskewEnabled,
   }), [
     state,
     files,
@@ -264,6 +276,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     addUploadedFile,
     getUploadedFile,
     getAllUploadedFiles,
+    setAutoDeskewEnabled,
   ]);
 
   return (
