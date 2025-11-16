@@ -152,7 +152,6 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onFilesUploaded }) => {
         // --- STEP 1: CORRECT ORIENTATION FIRST ---
         // This preserves the correct visual orientation in the file data
         const orientationCorrectedFile = await correctImageOrientation(file);
-        const originalSize = orientationCorrectedFile.size;
         
         let processedFile = orientationCorrectedFile;
         
@@ -187,6 +186,9 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onFilesUploaded }) => {
         } else {
           console.log(`${processedFile.name} is already PNG format`);
         }
+        
+        // Capture originalSize AFTER all conversions are complete
+        const originalSize = processedFile.size;
         
         // --- STEP 4: COMPRESS IF NEEDED ---
         console.log(`Processing image: ${processedFile.name}, original size: ${(originalSize / (1024 * 1024)).toFixed(2)}MB`);

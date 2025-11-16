@@ -12,10 +12,15 @@ const Index = () => {
   const [isUploading, setIsUploading] = useState(false);
   const navigate = useNavigate();
   const { user, signOut, loading } = useAuth();
-  const { setUploadedFileIds, setStep, addUploadedFile } = useWorkflow();
+  const { state, setUploadedFileIds, setStep, addUploadedFile, resetWorkflow } = useWorkflow();
   const { toast } = useToast();
 
   const handleFilesUploaded = async (files: File[]) => {
+    if (state.uploadedFileIds.length > 0 || state.processedSubjects.length > 0) {
+      console.log('🔄 Clearing previous workflow session before new upload');
+      resetWorkflow();
+    }
+    
     setIsUploading(true);
     
     try {

@@ -208,9 +208,22 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const resetWorkflow = useCallback(() => {
-    setState(initialState);
-    localStorage.removeItem(STORAGE_KEY);
+    console.log('🔄 Resetting workflow state...');
+    
+    // Clear in-memory file cache
     uploadedFilesRef.current.clear();
+    
+    // Reset state to initial values
+    setState(initialState);
+    
+    // Clear localStorage
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (error) {
+      console.error('Failed to clear workflow state from localStorage:', error);
+    }
+    
+    console.log('✅ Workflow state reset complete');
   }, []);
 
   const addUploadedFile = useCallback((fileId: string, file: File) => {

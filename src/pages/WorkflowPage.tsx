@@ -17,7 +17,7 @@ type WorkflowStep = 'upload' | 'remove-bg' | 'position' | 'finalize';
 const WorkflowPage = () => {
   const { step } = useParams<{ step: WorkflowStep }>();
   const navigate = useNavigate();
-  const { state, files, hasMissingFiles, setStep, setProcessedSubjects, setBatchId, setAutoDeskewEnabled } = useWorkflow();
+  const { state, files, hasMissingFiles, setStep, setProcessedSubjects, setBatchId, setAutoDeskewEnabled, resetWorkflow } = useWorkflow();
   const { toast } = useToast();
 
   useEffect(() => {
@@ -124,6 +124,7 @@ const WorkflowPage = () => {
   };
 
   const handleHome = () => {
+    resetWorkflow();
     navigate('/');
   };
 
