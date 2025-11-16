@@ -1,15 +1,16 @@
 /**
  * Background Removal using Replicate API
  * 
+ * Model: 851-labs/background-remover (InSPyReNet - ACCV 2022)
+ * - 10.3M+ runs, battle-tested for production use
+ * - ~2 seconds processing time on Nvidia T4 GPU
+ * - ~$0.00039 per run (~2,564 runs per $1)
+ * - Cleaner edges and fewer artifacts than previous models
+ * 
+ * Configuration:
+ * - threshold: 0.8 (hard segmentation for sharp edges)
+ * 
  * NOTE: Replicate API requires base64 data URLs for image input.
- * The API does not support binary uploads or external URLs for this model.
- * This is a limitation of the specific model (BRIA RMBG 1.4) being used.
- * 
- * Optimization opportunity: Future investigation could explore:
- * - Alternative Replicate models that support URL input
- * - Direct binary upload if supported in newer API versions
- * - Switching to a different background removal service
- * 
  * Current implementation uses base64 which works reliably but has size overhead.
  */
 
@@ -77,9 +78,10 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            version: 'fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003',
+            version: 'a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc',
             input: {
               image: image.data,
+              threshold: 0.8,
             }
           }),
         },

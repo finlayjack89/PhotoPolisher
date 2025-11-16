@@ -4,6 +4,14 @@
 LuxSnap is a professional photo editing platform designed for e-commerce and product photography. It uses AI for features like background removal, shadow generation, backdrop positioning, and batch processing to create studio-quality product images. The platform aims to streamline the product photography workflow and offers significant market potential for businesses requiring high-quality visual content.
 
 ## Recent Changes
+**November 16, 2025 - Background Removal Model Upgrade**
+- Upgraded from BRIA RMBG 1.4 to 851-labs/background-remover (InSPyReNet - ACCV 2022)
+- New model provides cleaner edges and fewer artifacts with 10.3M+ production runs
+- Added threshold parameter set to 0.8 for hard segmentation and sharper edges
+- ~2 second processing time on Nvidia T4 GPU, ~$0.00039 per run
+- More effective background removal for e-commerce product photography
+- Fixed shadow preview endpoint to use correct API route (/api/add-drop-shadow)
+
 **November 16, 2025 - Shadow Customization Sliders with Live Preview**
 - Re-introduced shadow customization sliders (azimuth, elevation, spread) in backdrop positioning step
 - Created reusable ShadowControls component extracted from ShadowGenerationStep
