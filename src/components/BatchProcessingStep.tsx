@@ -26,10 +26,15 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 interface Subject {
   name: string;
   originalData?: string;
+  originalFileId?: string;
   backgroundRemovedData?: string;
+  processedFileId?: string;
   deskewedData?: string; // Rotated version with background removed
+  deskewedFileId?: string; // File ID for deskewed version
   cleanDeskewedData?: string; // Rotated version without effects
+  cleanDeskewedFileId?: string; // File ID for clean deskewed version
   shadowedData?: string; // Cached shadowed image from shadow generation step
+  shadowedFileId?: string; // File ID for shadowed version
   size?: number;
   originalSize?: number;
   rotationAngle?: number;
@@ -193,51 +198,198 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
       // Actually regenerate shadows using the drop shadow API
       console.log(`🔄 Regenerating shadows for ${processedSubjects.length} subjects`);
       
-      // Prepare images for shadow regeneration (prefer deskewed versions if rotation was applied)
-      const imagesToProcess = processedSubjects.map(subject => {
+      // Prepare images for shadow regeneration using fileIds (prefer deskewed versions if rotation was applied)
+      const imagesToProcess = processedSubjects.map((subject, index) => {
         // Only use deskewed data if rotation confidence >= 75
         const wasRotated = subject.rotationConfidence && subject.rotationConfidence >= 75;
-        const data = isPreCut 
-          ? (wasRotated && subject.cleanDeskewedData) || subject.originalData || ''
-          : (wasRotated && subject.deskewedData) || subject.backgroundRemovedData || '';
         
-        // Log which version is being used for shadow regeneration
-        if (wasRotated && (subject.cleanDeskewedData || subject.deskewedData)) {
-          console.log(`🔄 Using rotated image for ${subject.name} (rotation applied with confidence: ${subject.rotationConfidence}%)`);
+        let fileId: string | null = null;
+        let fallbackData: string | null = null;
+        let source = '';
+        
+        if (isPreCut) {
+          // For pre-cut images, use clean deskewed or original
+          if (wasRotated && subject.cleanDeskewedFileId) {
+            fileId = subject.cleanDeskewedFileId;
+            source = 'cleanDeskewedFileId';
+          } else if (wasRotated && subject.cleanDeskewedData) {
+            fallbackData = subject.cleanDeskewedData;
+            source = 'cleanDeskewedData (no fileId)';
+          } else if (subject.originalFileId) {
+            fileId = subject.originalFileId;
+            source = 'originalFileId';
+          } else {
+            fallbackData = subject.originalData || '';
+            source = 'originalData (no fileId)';
+          }
+        } else {
+          // For background-removed images, use deskewed or processed
+          if (wasRotated && subject.deskewedFileId) {
+            fileId = subject.deskewedFileId;
+            source = 'deskewedFileId';
+          } else if (wasRotated && subject.deskewedData) {
+            fallbackData = subject.deskewedData;
+            source = 'deskewedData (no fileId)';
+          } else if (subject.processedFileId) {
+            fileId = subject.processedFileId;
+            source = 'processedFileId';
+          } else {
+            fallbackData = subject.backgroundRemovedData || '';
+            source = 'backgroundRemovedData (no fileId)';
+          }
+        }
+        
+        // Log which version is being used
+        if (wasRotated) {
+          console.log(`🔄 [${index + 1}] Using rotated image for ${subject.name} from ${source} (rotation: ${subject.rotationConfidence}%)`);
         } else {
           const reason = subject.rotationConfidence !== undefined && subject.rotationConfidence < 75 
             ? `low confidence (${subject.rotationConfidence}%)` 
             : 'no rotation data available';
-          console.log(`📐 Using original image for ${subject.name} (${reason})`);
+          console.log(`📐 [${index + 1}] Using original image for ${subject.name} from ${source} (${reason})`);
         }
         
-        return { name: subject.name, data };
+        return { 
+          name: subject.name, 
+          fileId: fileId || undefined,
+          data: fallbackData || undefined  // Fallback for backward compatibility
+        };
       });
       
-      setProgress(10);
-      setCurrentStep(`Regenerating shadows for ${imagesToProcess.length} images...`);
+      setProgress(5);
       
-      // Call the drop shadow API
-      const shadowResult = await api.addDropShadow({
-        images: imagesToProcess,
-        azimuth: currentShadowConfig.azimuth,
-        elevation: currentShadowConfig.elevation,
-        spread: currentShadowConfig.spread,
-        opacity: currentShadowConfig.opacity || 75
-      });
-      
-      setProgress(60);
-      
-      if (!shadowResult || !shadowResult.images) {
-        throw new Error('Failed to regenerate shadows - no data returned');
+      // Split into batches of 6-8 images to avoid 413 payload errors
+      const BATCH_SIZE = 7;
+      const batches: Array<typeof imagesToProcess> = [];
+      for (let i = 0; i < imagesToProcess.length; i += BATCH_SIZE) {
+        batches.push(imagesToProcess.slice(i, i + BATCH_SIZE));
       }
       
-      const shadowedImages = shadowResult.images;
+      console.log(`📦 Split ${imagesToProcess.length} images into ${batches.length} batches of ~${BATCH_SIZE} images each`);
       
-      // Update processed subjects with new shadowed data
+      // Process batches with parallelization (2-3 batches at a time)
+      const PARALLEL_BATCHES = 2;
+      const allShadowedImages: any[] = [];
+      
+      for (let batchGroupIndex = 0; batchGroupIndex < batches.length; batchGroupIndex += PARALLEL_BATCHES) {
+        const batchGroup = batches.slice(batchGroupIndex, batchGroupIndex + PARALLEL_BATCHES);
+        const batchNumbers = batchGroup.map((_, idx) => batchGroupIndex + idx + 1);
+        
+        console.log(`🔄 Processing batch group ${Math.floor(batchGroupIndex / PARALLEL_BATCHES) + 1} (batches ${batchNumbers.join(', ')} of ${batches.length})`);
+        
+        const groupStartTime = Date.now();
+        
+        // Process batches in parallel using Promise.allSettled to ensure one batch failure doesn't stop others
+        const batchResults = await Promise.allSettled(
+          batchGroup.map(async (batch, groupOffset) => {
+            const batchNumber = batchGroupIndex + groupOffset + 1;
+            const batchImages = batch.length;
+            
+            setCurrentStep(`Processing batch ${batchNumber} of ${batches.length} (${batchImages} images)...`);
+            
+            try {
+              // Prepare fileIds array for this batch
+              const fileIdsInBatch = batch
+                .map(img => img.fileId)
+                .filter((id): id is string => id !== undefined);
+              
+              const imagesInBatch = batch
+                .filter(img => img.data !== undefined)
+                .map(img => ({ name: img.name, data: img.data! }));
+              
+              // Validate that we have something to send
+              if (fileIdsInBatch.length === 0 && imagesInBatch.length === 0) {
+                console.warn(`⚠️ Batch ${batchNumber}: No valid images to process (all files missing)`);
+                return [];
+              }
+              
+              console.log(`📤 Batch ${batchNumber}: Sending ${fileIdsInBatch.length} fileIds + ${imagesInBatch.length} base64 images`);
+              
+              if (fileIdsInBatch.length > 0) {
+                console.log(`   FileIds: ${fileIdsInBatch.slice(0, 3).join(', ')}${fileIdsInBatch.length > 3 ? '...' : ''}`);
+              }
+              
+              // Call API with fileIds and fallback base64 data
+              const shadowResult = await api.addDropShadow({
+                fileIds: fileIdsInBatch.length > 0 ? batch.filter(img => img.fileId).map(img => ({ fileId: img.fileId!, name: img.name })) : undefined,
+                images: imagesInBatch.length > 0 ? imagesInBatch : undefined,
+                azimuth: currentShadowConfig.azimuth,
+                elevation: currentShadowConfig.elevation,
+                spread: currentShadowConfig.spread,
+                opacity: currentShadowConfig.opacity || 75
+              });
+              
+              if (!shadowResult || !shadowResult.images) {
+                console.warn(`⚠️ Batch ${batchNumber} returned no data, skipping`);
+                return [];
+              }
+              
+              console.log(`✅ Batch ${batchNumber} completed: ${shadowResult.images.length} images processed`);
+              return shadowResult.images;
+            } catch (error) {
+              console.error(`❌ Batch ${batchNumber} failed:`, error);
+              toast({
+                title: `Batch ${batchNumber} Failed`,
+                description: error instanceof Error ? error.message : 'Unknown error',
+                variant: 'destructive',
+              });
+              // Return empty array on failure (individual batch failure shouldn't stop entire process)
+              return [];
+            }
+          })
+        );
+        
+        const groupDuration = ((Date.now() - groupStartTime) / 1000).toFixed(1);
+        console.log(`⏱️ Batch group completed in ${groupDuration}s`);
+        
+        // Collect results from this batch group (handle both fulfilled and rejected promises)
+        batchResults.forEach((result, idx) => {
+          if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+            allShadowedImages.push(...result.value);
+          } else if (result.status === 'rejected') {
+            const batchNum = batchGroupIndex + idx + 1;
+            console.error(`❌ Batch ${batchNum} promise rejected:`, result.reason);
+          }
+        });
+        
+        // Update progress (5% initial + 75% for processing batches)
+        const processedBatches = Math.min(batchGroupIndex + PARALLEL_BATCHES, batches.length);
+        const progressPercent = 5 + (processedBatches / batches.length) * 75;
+        setProgress(progressPercent);
+        
+        toast({
+          title: "Batch Progress",
+          description: `Completed ${processedBatches} of ${batches.length} batches (${allShadowedImages.length} images processed)`,
+        });
+      }
+      
+      console.log(`✅ All batches completed: ${allShadowedImages.length} total images received`);
+      setProgress(80);
+      
+      // Count successful and failed images (must have non-empty shadowedData and no error)
+      const successfulImages = allShadowedImages.filter(img => 
+        img.shadowedData && 
+        img.shadowedData.length > 0 && 
+        !img.error &&
+        img.shadowedData !== ''
+      ).length;
+      const failedImages = processedSubjects.length - allShadowedImages.length;
+      const imagesWithErrors = allShadowedImages.filter(img => 
+        img.error || !img.shadowedData || img.shadowedData === ''
+      ).length;
+      const totalFailures = failedImages + imagesWithErrors;
+      
+      console.log(`📊 Shadow regeneration summary: ${successfulImages} successful, ${totalFailures} failed`);
+      
+      // Update processed subjects with new shadowed data (only if valid)
       const updatedSubjects = processedSubjects.map((subject, index) => {
-        const shadowedImage = shadowedImages.find(img => img.name === subject.name);
-        if (shadowedImage && shadowedImage.shadowedData) {
+        const shadowedImage = allShadowedImages.find(img => img.name === subject.name);
+        // Only update if shadowedData is valid (non-empty string with actual data)
+        if (shadowedImage && 
+            shadowedImage.shadowedData && 
+            shadowedImage.shadowedData.length > 0 &&
+            shadowedImage.shadowedData !== '' &&
+            !shadowedImage.error) {
           return {
             ...subject,
             shadowedData: shadowedImage.shadowedData
@@ -247,22 +399,41 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
       });
       
       setProcessedSubjects(updatedSubjects);
-      setProgress(80);
+      setProgress(85);
       
-      console.log(`✅ Successfully regenerated shadows for ${updatedSubjects.length} subjects`);
+      console.log(`✅ Successfully regenerated shadows for ${successfulImages} of ${processedSubjects.length} subjects`);
       
+      // Check if we have any usable shadows before proceeding
+      if (successfulImages === 0) {
+        // No successful shadows - abort the workflow
+        toast({
+          title: "Shadow Regeneration Failed",
+          description: `Failed to generate shadows for all ${processedSubjects.length} images. Please try again.`,
+          variant: "destructive",
+        });
+        setIsRegenerating(false);
+        setShowStaleWarning(true);
+        setProgress(0);
+        setCurrentStep("Shadow regeneration failed - no usable shadows created");
+        return;
+      }
+      
+      // Show summary toast with success/failure counts
       toast({
         title: "Shadows Regenerated",
-        description: `Successfully updated shadows for ${updatedSubjects.length} images`,
+        description: totalFailures > 0 
+          ? `Successfully updated ${successfulImages} of ${processedSubjects.length} images. ${totalFailures} failed.`
+          : `Successfully updated all ${successfulImages} images`,
+        variant: totalFailures > 0 ? "default" : "default",
       });
       
-      // Mark shadows as successfully generated ONLY after regeneration completes
+      // Mark shadows as successfully generated ONLY if at least one usable shadow was created
       markShadowsGenerated();
       
       setProgress(100);
       setCurrentStep("Shadow regeneration complete. Starting batch processing...");
       
-      // Now start batch processing with the updated shadowed subjects
+      // Now start batch processing with the updated shadowed subjects (only successful ones)
       setTimeout(() => {
         startBatchProcessing();
         setIsRegenerating(false);
@@ -446,58 +617,95 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
     
     console.log(`📦 [Batch] Starting compositing for ${successfulJobs.length} successful jobs (${completedJobs.length} total)`);
 
-    for (const [index, job] of successfulJobs.entries()) {
-      setCurrentStep(`Compositing ${index + 1} / ${successfulJobs.length}: ${job.name}`);
+    // Process canvases in parallel batches of 3 for better performance
+    const COMPOSITE_BATCH_SIZE = 3;
+    const totalBatches = Math.ceil(successfulJobs.length / COMPOSITE_BATCH_SIZE);
+    
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      const startIdx = batchIndex * COMPOSITE_BATCH_SIZE;
+      const endIdx = Math.min(startIdx + COMPOSITE_BATCH_SIZE, successfulJobs.length);
+      const batchJobs = successfulJobs.slice(startIdx, endIdx);
+      
+      console.log(`🎨 Processing compositing batch ${batchIndex + 1}/${totalBatches} (images ${startIdx + 1}-${endIdx})`);
+      setCurrentStep(`Compositing batch ${batchIndex + 1} of ${totalBatches} (${batchJobs.length} images)...`);
+      
+      // Process batch in parallel
+      const batchResults = await Promise.all(
+        batchJobs.map(async (job, batchOffset) => {
+          const index = startIdx + batchOffset;
+          
+          try {
+            // --- Step 3: Get shadowed subject dimensions ---
+            const { width: shadowedWidth, height: shadowedHeight } = await getImageDimensions(job.final_image_url!);
+            if (shadowedWidth === 0 || shadowedHeight === 0) throw new Error("Shadowed subject dimensions are zero");
 
-      try {
-        // --- Step 3: Get shadowed subject dimensions ---
-        const { width: shadowedWidth, height: shadowedHeight } = await getImageDimensions(job.final_image_url);
-        if (shadowedWidth === 0 || shadowedHeight === 0) throw new Error("Shadowed subject dimensions are zero");
+            // --- Step 3.5: Get clean subject dimensions ---
+            const { width: cleanWidth, height: cleanHeight } = await getImageDimensions(job.cleanCutoutData);
+            if (cleanWidth === 0 || cleanHeight === 0) throw new Error("Clean subject dimensions are zero");
 
-        // --- Step 3.5: Get clean subject dimensions ---
-        const { width: cleanWidth, height: cleanHeight } = await getImageDimensions(job.cleanCutoutData);
-        if (cleanWidth === 0 || cleanHeight === 0) throw new Error("Clean subject dimensions are zero");
+            // --- Step 4: Final Composite using unified layout calculation ---
+            const finalImageBlob = await compositeLayersV2({
+              backdropUrl: backdrop,
+              shadowedSubjectUrl: job.final_image_url!,
+              cleanSubjectUrl: job.cleanCutoutData,
+              shadowedSubjectWidth: shadowedWidth,
+              shadowedSubjectHeight: shadowedHeight,
+              cleanSubjectWidth: cleanWidth,
+              cleanSubjectHeight: cleanHeight,
+              placement: masterRules.placement,
+              paddingPercent: masterRules.padding,
+              aspectRatio: masterRules.aspectRatio,
+              numericAspectRatio: masterRules.numericAspectRatio,
+              reflectionOptions: masterRules.reflectionOptions
+            });
 
-        // --- Step 4: Final Composite using unified layout calculation ---
-        const finalImageBlob = await compositeLayersV2({
-          backdropUrl: backdrop,
-          shadowedSubjectUrl: job.final_image_url,
-          cleanSubjectUrl: job.cleanCutoutData,
-          shadowedSubjectWidth: shadowedWidth,
-          shadowedSubjectHeight: shadowedHeight,
-          cleanSubjectWidth: cleanWidth,
-          cleanSubjectHeight: cleanHeight,
-          placement: masterRules.placement,
-          paddingPercent: masterRules.padding,
-          aspectRatio: masterRules.aspectRatio,
-          numericAspectRatio: masterRules.numericAspectRatio,
-          reflectionOptions: masterRules.reflectionOptions
-        });
+            if (!finalImageBlob) throw new Error("Canvas compositing failed");
 
-        if (!finalImageBlob) throw new Error("Canvas compositing failed");
+            const compositedDataUrl = await new Promise<string>((resolve, reject) => {
+               const reader = new FileReader();
+               reader.onloadend = () => resolve(reader.result as string);
+               reader.onerror = reject;
+               reader.readAsDataURL(finalImageBlob);
+            });
 
-        const compositedDataUrl = await new Promise<string>((resolve, reject) => {
-           const reader = new FileReader();
-           reader.onloadend = () => resolve(reader.result as string);
-           reader.onerror = reject;
-           reader.readAsDataURL(finalImageBlob);
-        });
+            console.log(`✅ Composited ${job.name} (${index + 1}/${successfulJobs.length})`);
+            return { success: true, name: job.name, compositedData: compositedDataUrl };
 
-        finalResults.push({ name: job.name, compositedData: compositedDataUrl });
-        setCompletedImages(prev => [...prev, { name: job.name, compositedData: compositedDataUrl }]);
-
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "Compositing error";
-        console.error(`Failed to composite ${job.name}:`, error);
-        setFailedImages(prev => [...prev.filter(f => f.name !== job.name), { name: job.name, error: errorMessage }]);
-        toast({
-          title: `Failed: ${job.name}`,
-          description: errorMessage,
-          variant: "destructive",
-        });
-      }
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Compositing error";
+            console.error(`❌ Failed to composite ${job.name}:`, error);
+            return { success: false, name: job.name, error: errorMessage };
+          }
+        })
+      );
+      
+      // Process batch results
+      batchResults.forEach(result => {
+        if (result.success) {
+          finalResults.push({ name: result.name, compositedData: result.compositedData! });
+          setCompletedImages(prev => [...prev, { name: result.name, compositedData: result.compositedData! }]);
+        } else {
+          setFailedImages(prev => [...prev.filter(f => f.name !== result.name), { name: result.name, error: result.error! }]);
+          toast({
+            title: `Failed: ${result.name}`,
+            description: result.error,
+            variant: "destructive",
+          });
+        }
+      });
+      
+      // Update progress after each batch
+      const completedCount = Math.min(endIdx, successfulJobs.length);
+      const progressPercent = (completedCount / successfulJobs.length) * 100;
+      setProgress(progressPercent);
+      
+      console.log(`✅ Compositing batch ${batchIndex + 1}/${totalBatches} complete (${completedCount}/${successfulJobs.length} total)`);
+      
+      // Yield to UI between batches
+      await new Promise(resolve => requestAnimationFrame(() => resolve(undefined)));
     }
 
+    console.log(`✅ All compositing complete: ${finalResults.length} images rendered`);
     setCurrentStep("Batch processing complete!");
     
     // Mark shadows as successfully generated with current config

@@ -19,8 +19,12 @@ interface WorkflowState {
     originalData?: string;
     deskewedData?: string | null;
     cleanDeskewedData?: string | null;
+    deskewedFileId?: string | null;
+    cleanDeskewedFileId?: string | null;
     rotationAngle?: number;
     rotationConfidence?: number;
+    shadowedData?: string;
+    shadowedFileId?: string;
   }>;
   autoDeskewEnabled: boolean;
   selectedBackdropId: string | null;

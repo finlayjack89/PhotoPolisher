@@ -605,7 +605,7 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
   app.post("/api/add-drop-shadow", async (req: Request, res: Response) => {
     try {
       const { addDropShadow } = await import("./image-processing/add-drop-shadow");
-      const result = await addDropShadow(req.body);
+      const result = await addDropShadow(req.body, storage);
       res.json(result);
     } catch (error) {
       console.error("Error in add-drop-shadow:", error);

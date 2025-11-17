@@ -1,10 +1,15 @@
 import fetch from 'node-fetch';
 import FormData from 'form-data';
 import crypto from 'crypto';
+import type { IStorage } from '../storage';
 
 export interface AddDropShadowRequest {
   images?: Array<{
     data: string;
+    name: string;
+  }>;
+  fileIds?: Array<{
+    fileId: string;
     name: string;
   }>;
   uploadPreview?: boolean;
@@ -72,7 +77,7 @@ async function retryWithBackoff<T>(
   throw lastError;
 }
 
-export async function addDropShadow(req: AddDropShadowRequest) {
+export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorage) {
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
   const apiKey = process.env.CLOUDINARY_API_KEY;
   const apiSecret = process.env.CLOUDINARY_API_SECRET;
@@ -81,7 +86,7 @@ export async function addDropShadow(req: AddDropShadowRequest) {
     throw new Error('Cloudinary credentials not configured');
   }
 
-  const { images, uploadPreview, image, azimuth = 0, elevation = 90, spread = 5, opacity = 75 } = req; // <-- ADDED opacity
+  const { images, fileIds, uploadPreview, image, azimuth = 0, elevation = 90, spread = 5, opacity = 75 } = req; // <-- ADDED opacity
 
   // Handle preview upload
   if (uploadPreview && image) {
@@ -126,19 +131,70 @@ export async function addDropShadow(req: AddDropShadowRequest) {
     };
   }
 
-  if (!images || !Array.isArray(images) || images.length === 0) {
-    throw new Error('No images provided');
+  // Convert fileIds to images array if provided
+  let imagesToProcess: Array<{ data: string; name: string }> = [];
+  
+  if (fileIds && Array.isArray(fileIds) && fileIds.length > 0) {
+    if (!storage) {
+      throw new Error('Storage instance required when using fileIds');
+    }
+    
+    console.log(`📁 Loading ${fileIds.length} images from storage by fileId...`);
+    
+    for (const { fileId, name } of fileIds) {
+      try {
+        const fileData = await storage.getFile(fileId);
+        
+        if (!fileData) {
+          console.error(`File not found for fileId: ${fileId}`);
+          imagesToProcess.push({
+            data: '',
+            name: name || 'unknown',
+          });
+          continue;
+        }
+        
+        const base64Data = `data:${fileData.file.mimeType};base64,${fileData.buffer.toString('base64')}`;
+        imagesToProcess.push({
+          data: base64Data,
+          name: name || fileData.file.originalFilename || 'image',
+        });
+        
+        console.log(`✅ Loaded ${name} from storage (${fileData.buffer.length} bytes)`);
+      } catch (error) {
+        console.error(`Failed to load file ${fileId}:`, error);
+        imagesToProcess.push({
+          data: '',
+          name: name || 'unknown',
+        });
+      }
+    }
+  } else if (images && Array.isArray(images) && images.length > 0) {
+    // Fallback to legacy base64 data approach
+    imagesToProcess = images;
+  } else {
+    throw new Error('No images or fileIds provided');
   }
 
-  console.log(`Processing ${images.length} images for drop shadow with params: azimuth=${azimuth}, elevation=${elevation}, spread=${spread}, opacity=${opacity}`); // <-- ADDED opacity log
+  console.log(`Processing ${imagesToProcess.length} images for drop shadow with params: azimuth=${azimuth}, elevation=${elevation}, spread=${spread}, opacity=${opacity}`);
 
   const processedImages = [];
 
-  for (let i = 0; i < images.length; i++) {
-    const img = images[i];
-    console.log(`Processing image ${i + 1}/${images.length}: ${img.name}`);
+  for (let i = 0; i < imagesToProcess.length; i++) {
+    const img = imagesToProcess[i];
+    console.log(`Processing image ${i + 1}/${imagesToProcess.length}: ${img.name}`);
 
     try {
+      // Skip if no data (file not found)
+      if (!img.data) {
+        processedImages.push({
+          name: img.name,
+          shadowedData: '',
+          error: 'File not found in storage',
+        });
+        continue;
+      }
+
       const timestamp = Math.floor(Date.now() / 1000);
       const folder = 'drop_shadow_temp';
       const signatureString = `folder=${folder}&timestamp=${timestamp}${apiSecret}`;
