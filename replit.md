@@ -40,6 +40,10 @@ Preferred communication style: Simple, everyday language.
 - **Optimized Compression Settings**: Increased target from 5MB to 8MB and max dimension from 2048px to 3072px for better quality while maintaining performance and bandwidth efficiency.
 - **Code Consolidation**: Created `server/utils/fetch-utils.ts` (fetchWithTimeout, retryWithBackoff) and `src/lib/file-utils.ts` (fileToDataUrl, formatFileSize, loadImage) to eliminate duplicate implementations across codebase. Removed deprecated `compress-images.ts`.
 
+### Phase 2 Performance Optimizations (November 2025)
+- **Memory-Aware Batch Size Validation**: Enforces 300MB total batch size limit across all processing endpoints to prevent out-of-memory errors. Includes frontend pre-compression validation with helpful toast messages, Zod-validated API route guards for both fileIds and base64 images payloads, and normalized base64 size calculations. Applied to shadow generation, background removal, and all batch processing endpoints with consistent 400 error responses including computed sizes.
+- **Canvas Memory Management**: Comprehensive cleanup of HTML canvas elements after all image processing operations to prevent memory leaks during batch workflows. Created `cleanupCanvas()` helper function and integrated cleanup into 8 functions across 4 files (canvas-utils, reflection-utils, image-orientation-utils, image-resize-utils). Uses try-finally blocks to guarantee cleanup on all code paths including the critical hot compression path in `processAndCompressImage`, preventing memory buildup when processing large batches of high-resolution images.
+
 ## External Dependencies
 
 ### AI & Image Processing Services
