@@ -51,6 +51,8 @@ export const processAndCompressImage = (file: File, originalFileSize?: number): 
       return resolve(file);
     }
     
+    const compressionStartTime = Date.now();
+    
     // Only process files over 8MB
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -112,6 +114,9 @@ export const processAndCompressImage = (file: File, originalFileSize?: number): 
               // Check if we're in the target range (7MB - 8MB)
               if (compressedBlob.size >= SIZE_7MB && compressedBlob.size <= SIZE_8MB) {
                 console.log(`Target reached: ${(compressedBlob.size / (1024 * 1024)).toFixed(2)}MB`);
+                const durationMs = Math.round(Date.now() - compressionStartTime);
+                const sizeMB = (compressedBlob.size / (1024 * 1024)).toFixed(2);
+                console.log(`⏱️ [PERF] Image compression: ${file.name} took ${durationMs}ms (${iterations + 1} iterations, final size: ${sizeMB}MB)`);
                 return resolve(compressedBlob);
               }
               
@@ -119,10 +124,16 @@ export const processAndCompressImage = (file: File, originalFileSize?: number): 
               if (compressedBlob.size < SIZE_7MB) {
                 if (bestBlob && bestBlob.size >= SIZE_7MB) {
                   console.log(`Using previous iteration: ${(bestBlob.size / (1024 * 1024)).toFixed(2)}MB`);
+                  const durationMs = Math.round(Date.now() - compressionStartTime);
+                  const sizeMB = (bestBlob.size / (1024 * 1024)).toFixed(2);
+                  console.log(`⏱️ [PERF] Image compression: ${file.name} took ${durationMs}ms (${iterations + 1} iterations, final size: ${sizeMB}MB)`);
                   return resolve(bestBlob);
                 }
                 // If no suitable previous blob, use current (better than nothing)
                 console.log(`Below target but using current: ${(compressedBlob.size / (1024 * 1024)).toFixed(2)}MB`);
+                const durationMs = Math.round(Date.now() - compressionStartTime);
+                const sizeMB = (compressedBlob.size / (1024 * 1024)).toFixed(2);
+                console.log(`⏱️ [PERF] Image compression: ${file.name} took ${durationMs}ms (${iterations + 1} iterations, final size: ${sizeMB}MB)`);
                 return resolve(compressedBlob);
               }
               
@@ -136,6 +147,9 @@ export const processAndCompressImage = (file: File, originalFileSize?: number): 
               // Don't go below reasonable minimum
               if (currentWidth < 512 || currentHeight < 512) {
                 console.log(`Minimum dimensions reached, using best available: ${(bestBlob.size / (1024 * 1024)).toFixed(2)}MB`);
+                const durationMs = Math.round(Date.now() - compressionStartTime);
+                const sizeMB = (bestBlob.size / (1024 * 1024)).toFixed(2);
+                console.log(`⏱️ [PERF] Image compression: ${file.name} took ${durationMs}ms (${iterations + 1} iterations, final size: ${sizeMB}MB)`);
                 return resolve(bestBlob);
               }
               
@@ -144,7 +158,11 @@ export const processAndCompressImage = (file: File, originalFileSize?: number): 
             
             // Fallback: return the best blob we have
             console.log(`Max iterations reached, using best: ${bestBlob ? (bestBlob.size / (1024 * 1024)).toFixed(2) : 'none'}MB`);
-            return resolve(bestBlob || lastBlob!);
+            const durationMs = Math.round(Date.now() - compressionStartTime);
+            const blob = bestBlob || lastBlob!;
+            const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
+            console.log(`⏱️ [PERF] Image compression: ${file.name} took ${durationMs}ms (${iterations} iterations, final size: ${sizeMB}MB)`);
+            return resolve(blob);
           } finally {
             // Clean up canvas to free memory on ALL code paths
             cleanupCanvas(canvas);

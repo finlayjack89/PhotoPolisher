@@ -180,6 +180,8 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
     setCurrentStep("Regenerating shadows...");
     
     try {
+      const regenerationStartTime = Date.now();
+      
       // Get current shadow config from context
       const currentShadowConfig = state.shadowConfig;
       
@@ -382,6 +384,11 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
       const totalFailures = failedImages + imagesWithErrors;
       
       console.log(`📊 Shadow regeneration summary: ${successfulImages} successful, ${totalFailures} failed`);
+      
+      // Log performance metrics for shadow regeneration
+      const totalMs = Math.round(Date.now() - regenerationStartTime);
+      const avgMs = successfulImages > 0 ? Math.round(totalMs / successfulImages) : 0;
+      console.log(`⏱️ [PERF] Shadow regeneration complete: ${totalMs}ms for ${successfulImages} images (avg ${avgMs}ms per image)`);
       
       // Update processed subjects with new shadowed data (store both shadowedData and shadowedFileId)
       const updatedSubjects = processedSubjects.map((subject, index) => {

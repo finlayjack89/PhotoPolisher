@@ -42,11 +42,14 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
   console.log(`Processing ${images.length} images for background removal`);
 
   const processedImages = [];
+  const batchStartTime = Date.now();
 
   for (const image of images) {
     try {
       console.log(`Removing background from: ${image.name}`);
 
+      const imageStartTime = Date.now();
+      const predictionStartTime = Date.now();
       const response = await fetchWithTimeout(
         'https://api.replicate.com/v1/predictions',
         {
@@ -63,7 +66,8 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
             }
           }),
         },
-        REPLICATE_REQUEST_TIMEOUT
+        REPLICATE_REQUEST_TIMEOUT,
+        `Replicate prediction start: ${image.name}`
       );
 
       if (!response.ok) {
@@ -98,7 +102,8 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
               'Authorization': `Bearer ${REPLICATE_API_KEY}`,
             },
           },
-          REPLICATE_REQUEST_TIMEOUT
+          REPLICATE_REQUEST_TIMEOUT,
+          `Replicate status poll: ${image.name}`
         );
         
         result = await statusResponse.json() as any;
@@ -107,6 +112,8 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
         // Exponential backoff with max delay
         pollDelay = Math.min(pollDelay * 1.5, MAX_POLL_DELAY);
       }
+
+      const predictionMs = Math.round(Date.now() - predictionStartTime);
 
       if (result.status === 'succeeded' && result.output) {
         // Defensively extract URL from Replicate output
@@ -161,10 +168,12 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
           throw new Error('Could not extract valid URL from Replicate output');
         }
         
+        const downloadStartTime = Date.now();
         const imageResponse = await fetch(outputUrl);
         const imageBuffer = await imageResponse.arrayBuffer();
         const base64 = Buffer.from(imageBuffer).toString('base64');
         const transparentDataUrl = `data:image/png;base64,${base64}`;
+        const downloadMs = Math.round(Date.now() - downloadStartTime);
         
         processedImages.push({
           name: image.name,
@@ -172,7 +181,9 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
           size: imageBuffer.byteLength,
         });
         
+        const totalImageMs = Math.round(Date.now() - imageStartTime);
         console.log(`✅ Successfully removed background from ${image.name} (${imageBuffer.byteLength} bytes)`);
+        console.log(`⏱️ [PERF] Background removal: ${image.name} took ${totalImageMs}ms (prediction: ${predictionMs}ms, download: ${downloadMs}ms)`);
       } else {
         throw new Error(`Background removal failed: ${result.status}`);
       }
@@ -193,6 +204,10 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
       });
     }
   }
+
+  const batchTotalMs = Math.round(Date.now() - batchStartTime);
+  const successfulCount = processedImages.filter(img => !img.error).length;
+  console.log(`⏱️ [PERF] Background removal batch: ${successfulCount} images in ${batchTotalMs}ms`);
 
   return {
     success: true,

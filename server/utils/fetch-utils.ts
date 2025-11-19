@@ -10,15 +10,18 @@ import fetch from 'node-fetch';
  * @param url - URL to fetch
  * @param options - Fetch options
  * @param timeout - Timeout in milliseconds (default: 30000)
+ * @param logLabel - Optional label for performance logging
  * @returns Promise resolving to Response
  */
 export async function fetchWithTimeout(
   url: string, 
   options: any, 
-  timeout: number = 30000
+  timeout: number = 30000,
+  logLabel?: string
 ): Promise<any> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
+  const startTime = Date.now();
   
   try {
     const response = await fetch(url, {
@@ -26,6 +29,12 @@ export async function fetchWithTimeout(
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
+    
+    if (logLabel) {
+      const durationMs = Math.round(Date.now() - startTime);
+      console.log(`⏱️ [API] ${logLabel} took ${durationMs}ms (${response.status})`);
+    }
+    
     return response;
   } catch (error: any) {
     clearTimeout(timeoutId);

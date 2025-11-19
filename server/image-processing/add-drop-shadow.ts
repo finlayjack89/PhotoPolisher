@@ -147,6 +147,7 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
   console.log(`Processing ${imagesToProcess.length} images for drop shadow with params: azimuth=${azimuth}, elevation=${elevation}, spread=${spread}, opacity=${opacity}`);
 
   const processedImages = [];
+  const batchStartTime = Date.now();
 
   for (let i = 0; i < imagesToProcess.length; i++) {
     const img = imagesToProcess[i];
@@ -164,6 +165,7 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
         continue;
       }
 
+      const imageStartTime = Date.now();
       const timestamp = Math.floor(Date.now() / 1000);
       const folder = 'drop_shadow_temp';
       const signatureString = `folder=${folder}&timestamp=${timestamp}${apiSecret}`;
@@ -178,6 +180,7 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
 
       console.log(`Uploading ${img.name} to Cloudinary with signed upload...`);
 
+      const uploadStartTime = Date.now();
       // Use timeout and retry logic for image upload
       const uploadResponse = await retryWithBackoff(
         () => fetchWithTimeout(
@@ -186,9 +189,11 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
             method: 'POST',
             body: uploadData,
           },
-          30000
+          30000,
+          `Cloudinary upload: ${img.name}`
         )
       );
+      const uploadMs = Math.round(Date.now() - uploadStartTime);
 
       if (!uploadResponse.ok) {
         const errorText = await uploadResponse.text();
@@ -209,9 +214,10 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
 
       console.log(`Transformation URL: ${transformedUrl}`);
 
+      const transformStartTime = Date.now();
       // Use timeout and retry logic for transformed image fetch
       const transformedResponse = await retryWithBackoff(
-        () => fetchWithTimeout(transformedUrl, {}, 30000)
+        () => fetchWithTimeout(transformedUrl, {}, 30000, `Cloudinary transform: ${img.name}`)
       );
 
       if (!transformedResponse.ok) {
@@ -220,6 +226,7 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
 
       const transformedBuffer = await transformedResponse.arrayBuffer();
       const base64 = Buffer.from(transformedBuffer).toString('base64');
+      const transformMs = Math.round(Date.now() - transformStartTime);
 
       const shadowedDataUrl = `data:image/png;base64,${base64}`;
 
@@ -253,6 +260,8 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
       console.log(`✅ Successfully added shadow to ${img.name}`);
 
       // Cleanup
+      const cleanupStartTime = Date.now();
+      let cleanupMs = 0;
       try {
         const deleteTimestamp = Math.floor(Date.now() / 1000);
         const deleteSignatureString = `public_id=${uploadResult.public_id}&timestamp=${deleteTimestamp}${apiSecret}`;
@@ -271,15 +280,21 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
             method: 'POST',
             body: deleteData,
           },
-          30000
+          30000,
+          `Cloudinary cleanup: ${img.name}`
         );
 
         if (deleteResponse.ok) {
           console.log(`🗑️ Cleaned up temporary Cloudinary image: ${uploadResult.public_id}`);
         }
+        cleanupMs = Math.round(Date.now() - cleanupStartTime);
       } catch (cleanupError) {
         console.warn('Failed to cleanup Cloudinary image:', cleanupError);
+        cleanupMs = Math.round(Date.now() - cleanupStartTime);
       }
+
+      const totalImageMs = Math.round(Date.now() - imageStartTime);
+      console.log(`⏱️ [PERF] Shadow generation: ${img.name} took ${totalImageMs}ms (upload: ${uploadMs}ms, transform: ${transformMs}ms, cleanup: ${cleanupMs}ms)`);
 
     } catch (imageError) {
       console.error(`Failed to process ${img.name}:`, imageError);
@@ -291,6 +306,11 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
       });
     }
   }
+
+  const batchTotalMs = Math.round(Date.now() - batchStartTime);
+  const successfulCount = processedImages.filter(img => !img.error).length;
+  const avgMs = successfulCount > 0 ? Math.round(batchTotalMs / successfulCount) : 0;
+  console.log(`⏱️ [PERF] Shadow batch complete: ${successfulCount} images in ${batchTotalMs}ms (avg ${avgMs}ms per image)`);
 
   return {
     success: true,
