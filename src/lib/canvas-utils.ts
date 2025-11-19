@@ -17,6 +17,49 @@ export function cleanupCanvas(canvas: HTMLCanvasElement): void {
   canvas.height = 0;
 }
 
+/**
+ * Scans the bottom of an image to detect transparent padding.
+ * Returns the number of empty pixels at the bottom.
+ * This is used to close gaps between products and reflections.
+ * 
+ * @param img - The image to scan
+ * @returns Number of transparent pixels at the bottom
+ */
+function getBottomPadding(img: HTMLImageElement): number {
+  const canvas = document.createElement('canvas');
+  // Limit size for performance - we only need vertical resolution
+  canvas.width = 100;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  
+  if (!ctx) return 0;
+  
+  try {
+    // Draw resized to width 100, but keep full height to measure padding accurately
+    ctx.drawImage(img, 0, 0, 100, canvas.height);
+    
+    const width = canvas.width;
+    const height = canvas.height;
+    const imgData = ctx.getImageData(0, 0, width, height);
+    const data = imgData.data;
+    
+    // Scan from bottom up
+    for (let y = height - 1; y >= 0; y--) {
+      for (let x = 0; x < width; x++) {
+        const alpha = data[(y * width + x) * 4 + 3];
+        if (alpha > 10) { // Threshold to ignore compression artifacts
+          // Found the first visible pixel from bottom
+          return height - 1 - y;
+        }
+      }
+    }
+    
+    return 0; // Image is completely empty or full height
+  } finally {
+    cleanupCanvas(canvas);
+  }
+}
+
 export interface SubjectPlacement {
   x: number; // Horizontal position (0-1, where 0.5 is center)
   y: number; // Vertical position (0-1, where 0 is top, 1 is bottom)
@@ -337,35 +380,11 @@ export async function compositeLayers(
     canvas.height = options.outputHeight;
 
     // Calculate positioning using old logic
-    let finalX = Math.round((canvas.width * placement.x) - (subjectLayer.width / 2));
-    let finalY = Math.round((canvas.height * placement.y) - subjectLayer.height);
-
-    // --- AUTO-LIFT LOGIC START ---
-    let liftAmount = 0;
-    if (reflectionOptions && reflectionOptions.opacity > 0) {
-      // Estimate reflection dimensions using EXACT same math as drawing code
-      const estimatedScale = Math.min(
-        (subjectLayer.width / 1.5) / cleanW,
-        (subjectLayer.height / 1.5) / cleanH
-      );
-      const productHeight = cleanH * estimatedScale;
-      const reflectionHeight = Math.round(productHeight * 0.6); // Match drawing code: 60% of product height
-      const GAP = 2;
-      
-      // Calculate where reflection would end
-      const productOffsetY = (subjectLayer.height - cleanH) / 2;
-      const actualProductY = finalY + productOffsetY;
-      const visualBottom = actualProductY + productHeight + reflectionHeight - GAP;
-      
-      // Check if reflection would overflow
-      const overflow = visualBottom - canvas.height;
-      if (overflow > 0) {
-        liftAmount = overflow + 20; // Add 20px safety margin
-        finalY = finalY - liftAmount;
-        console.log(`🚀 [Auto-Lift Legacy] Shifting subject up by ${liftAmount}px to fit reflection (visualBottom: ${visualBottom}, canvasHeight: ${canvas.height})`);
-      }
-    }
-    // --- AUTO-LIFT LOGIC END ---
+    // --- REMOVED AUTO-LIFT LOGIC ---
+    // We strictly respect the user's placement variable.
+    // Reflections are allowed to crop naturally at the canvas edge (photometrically correct).
+    const finalX = Math.round((canvas.width * placement.x) - (subjectLayer.width / 2));
+    const finalY = Math.round((canvas.height * placement.y) - subjectLayer.height);
 
     // Draw backdrop
     ctx.drawImage(backdropImg, 0, 0, canvas.width, canvas.height);
@@ -389,13 +408,30 @@ export async function compositeLayers(
         const productHeight = cleanH * estimatedScale;
         const reflectionWidth = Math.round(cleanW * estimatedScale);
         const reflectionHeight = Math.max(1, Math.round(productHeight * 0.6)); // Reflection is 60% of product height
-        const GAP = 2;
+        
+        // SMART GAP FIX:
+        // 1. Measure empty space at bottom of image
+        const rawPadding = getBottomPadding(cleanSubjectImg);
+        
+        // 2. Scale padding to current draw size
+        const scaleFactor = productHeight / cleanH;
+        const visualPadding = rawPadding * scaleFactor;
+
+        console.log(`📏 [Smart Gap Legacy] Raw Padding: ${rawPadding}px, Scaled: ${visualPadding.toFixed(2)}px`);
+
+        // 3. Calculate Overlap
+        // Formula: y + height - (2 * padding) - overlap
+        // We subtract padding TWICE: once for subject's empty bottom, once for reflection's empty top.
+        const GAP_OVERLAP = 2;
+        const reflectionY = actualProductY + productHeight - (visualPadding * 2) - GAP_OVERLAP;
         
         console.log('🪞 [compositeLayers] Reflection params:', {
           reflectionWidth,
           reflectionHeight,
           productHeight,
           estimatedScale,
+          visualPadding: visualPadding.toFixed(2),
+          reflectionY: reflectionY.toFixed(2),
           opacity: reflectionOptions.opacity
         });
 
@@ -404,7 +440,7 @@ export async function compositeLayers(
           cleanSubjectImg,
           {
             x: Math.floor(actualProductX), // Use floor to avoid sub-pixel rendering
-            y: Math.floor(actualProductY + productHeight - GAP), // Position with 2px overlap
+            y: Math.floor(reflectionY), // Use smart gap calculation
             width: reflectionWidth,
             height: reflectionHeight // Use 60% height, not full product height
           },
@@ -504,29 +540,13 @@ export async function compositeLayersV2(
       loadImage(cleanSubjectUrl)
     ]);
 
-    console.log('🎨 [Compositing V2] Starting render with Auto-Lift');
+    console.log('🎨 [Compositing V2] Rendering without Auto-Lift');
 
-    // --- AUTO-LIFT LOGIC START ---
-    // Calculate where the reflection would naturally end
-    const reflectionHeight = Math.round(layout.productRect.height * 0.6);
-    const GAP = 2; 
-    const visualBottom = layout.productRect.y + layout.productRect.height + reflectionHeight - GAP;
-    
-    // Calculate shift needed if it overflows canvas
-    let liftAmount = 0;
-    if (reflectionOptions && reflectionOptions.opacity > 0) {
-        const overflow = visualBottom - canvas.height;
-        if (overflow > 0) {
-            // Lift by overflow amount + 20px safety padding
-            liftAmount = overflow + 20; 
-            console.log(`🚀 [Auto-Lift] Shifting subject up by ${liftAmount}px to fit reflection (visualBottom: ${visualBottom}, canvasHeight: ${canvas.height})`);
-        }
-    }
-
-    // Apply shift to all components
-    const shadowY = layout.shadowedSubjectRect.y - liftAmount;
-    const productY = layout.productRect.y - liftAmount;
-    // --- AUTO-LIFT LOGIC END ---
+    // --- REMOVED AUTO-LIFT LOGIC ---
+    // We strictly respect the user's placement variable.
+    // Reflections are allowed to crop naturally at the canvas edge (photometrically correct).
+    const shadowY = layout.shadowedSubjectRect.y;
+    const productY = layout.productRect.y;
 
     // 4. Draw Backdrop (Bottom Layer)
     ctx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
@@ -542,9 +562,26 @@ export async function compositeLayersV2(
 
     // 6. Draw Reflection (Middle Layer 2) - MUST be before Product
     if (reflectionOptions && reflectionOptions.opacity > 0) {
+      // SMART GAP FIX:
+      // 1. Measure empty space at bottom of image
+      const rawPadding = getBottomPadding(cleanSubjectImg);
+      
+      // 2. Scale padding to current draw size
+      const scaleFactor = layout.productRect.height / cleanSubjectImg.naturalHeight;
+      const visualPadding = rawPadding * scaleFactor;
+
+      console.log(`📏 [Smart Gap] Raw Padding: ${rawPadding}px, Scaled: ${visualPadding.toFixed(2)}px`);
+
+      // 3. Calculate Overlap
+      // Formula: y + height - (2 * padding) - overlap
+      // We subtract padding TWICE: once for subject's empty bottom, once for reflection's empty top.
+      const GAP_OVERLAP = 2;
+      const reflectionY = productY + layout.productRect.height - (visualPadding * 2) - GAP_OVERLAP;
+      const reflectionHeight = Math.round(layout.productRect.height * 0.6);
+
       const adjustedReflectionRect = {
         x: layout.productRect.x,
-        y: productY + layout.productRect.height - GAP, // Use lifted productY
+        y: reflectionY,
         width: layout.productRect.width,
         height: reflectionHeight
       };
