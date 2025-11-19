@@ -336,14 +336,41 @@ export async function compositeLayers(
     canvas.width = options.outputWidth;
     canvas.height = options.outputHeight;
 
+    // Calculate positioning using old logic
+    let finalX = Math.round((canvas.width * placement.x) - (subjectLayer.width / 2));
+    let finalY = Math.round((canvas.height * placement.y) - subjectLayer.height);
+
+    // --- AUTO-LIFT LOGIC START ---
+    let liftAmount = 0;
+    if (reflectionOptions && reflectionOptions.opacity > 0) {
+      // Estimate reflection dimensions using EXACT same math as drawing code
+      const estimatedScale = Math.min(
+        (subjectLayer.width / 1.5) / cleanW,
+        (subjectLayer.height / 1.5) / cleanH
+      );
+      const productHeight = cleanH * estimatedScale;
+      const reflectionHeight = Math.round(productHeight * 0.6); // Match drawing code: 60% of product height
+      const GAP = 2;
+      
+      // Calculate where reflection would end
+      const productOffsetY = (subjectLayer.height - cleanH) / 2;
+      const actualProductY = finalY + productOffsetY;
+      const visualBottom = actualProductY + productHeight + reflectionHeight - GAP;
+      
+      // Check if reflection would overflow
+      const overflow = visualBottom - canvas.height;
+      if (overflow > 0) {
+        liftAmount = overflow + 20; // Add 20px safety margin
+        finalY = finalY - liftAmount;
+        console.log(`🚀 [Auto-Lift Legacy] Shifting subject up by ${liftAmount}px to fit reflection (visualBottom: ${visualBottom}, canvasHeight: ${canvas.height})`);
+      }
+    }
+    // --- AUTO-LIFT LOGIC END ---
+
     // Draw backdrop
     ctx.drawImage(backdropImg, 0, 0, canvas.width, canvas.height);
 
-    // Calculate positioning using old logic
-    const finalX = Math.round((canvas.width * placement.x) - (subjectLayer.width / 2));
-    const finalY = Math.round((canvas.height * placement.y) - subjectLayer.height);
-
-    // Draw reflection if enabled
+    // Draw reflection if enabled (BEFORE shadowed subject so subject covers the seam)
     if (reflectionOptions && reflectionOptions.opacity > 0) {
       try {
         console.log('🪞 [compositeLayers] Starting reflection generation');
@@ -359,12 +386,15 @@ export async function compositeLayers(
         );
 
         // Calculate reflection dimensions with safety checks
+        const productHeight = cleanH * estimatedScale;
         const reflectionWidth = Math.round(cleanW * estimatedScale);
-        const reflectionHeight = Math.max(1, Math.round(cleanH * estimatedScale)); // Ensure at least 1px
+        const reflectionHeight = Math.max(1, Math.round(productHeight * 0.6)); // Reflection is 60% of product height
+        const GAP = 2;
         
         console.log('🪞 [compositeLayers] Reflection params:', {
           reflectionWidth,
           reflectionHeight,
+          productHeight,
           estimatedScale,
           opacity: reflectionOptions.opacity
         });
@@ -374,9 +404,9 @@ export async function compositeLayers(
           cleanSubjectImg,
           {
             x: Math.floor(actualProductX), // Use floor to avoid sub-pixel rendering
-            y: Math.floor(actualProductY + cleanH * estimatedScale),
+            y: Math.floor(actualProductY + productHeight - GAP), // Position with 2px overlap
             width: reflectionWidth,
-            height: reflectionHeight
+            height: reflectionHeight // Use 60% height, not full product height
           },
           reflectionOptions
         );
@@ -474,33 +504,62 @@ export async function compositeLayersV2(
       loadImage(cleanSubjectUrl)
     ]);
 
-    console.log('🎨 [Compositing V2] Using unified layout calculation');
+    console.log('🎨 [Compositing V2] Starting render with Auto-Lift');
 
-    // 4. Draw backdrop
+    // --- AUTO-LIFT LOGIC START ---
+    // Calculate where the reflection would naturally end
+    const reflectionHeight = Math.round(layout.productRect.height * 0.6);
+    const GAP = 2; 
+    const visualBottom = layout.productRect.y + layout.productRect.height + reflectionHeight - GAP;
+    
+    // Calculate shift needed if it overflows canvas
+    let liftAmount = 0;
+    if (reflectionOptions && reflectionOptions.opacity > 0) {
+        const overflow = visualBottom - canvas.height;
+        if (overflow > 0) {
+            // Lift by overflow amount + 20px safety padding
+            liftAmount = overflow + 20; 
+            console.log(`🚀 [Auto-Lift] Shifting subject up by ${liftAmount}px to fit reflection (visualBottom: ${visualBottom}, canvasHeight: ${canvas.height})`);
+        }
+    }
+
+    // Apply shift to all components
+    const shadowY = layout.shadowedSubjectRect.y - liftAmount;
+    const productY = layout.productRect.y - liftAmount;
+    // --- AUTO-LIFT LOGIC END ---
+
+    // 4. Draw Backdrop (Bottom Layer)
     ctx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
 
-    // 5. Draw shadow layer (shadowedSubject from Cloudinary contains ONLY the shadow)
-    const shadowRect = layout.shadowedSubjectRect;
-    ctx.drawImage(shadowedSubjectImg, shadowRect.x, shadowRect.y, shadowRect.width, shadowRect.height);
+    // 5. Draw Shadow (Middle Layer 1)
+    ctx.drawImage(
+        shadowedSubjectImg, 
+        layout.shadowedSubjectRect.x, 
+        shadowY, // Use lifted Y
+        layout.shadowedSubjectRect.width, 
+        layout.shadowedSubjectRect.height
+    );
 
-    // 6. Draw reflection (if enabled) - BEFORE drawing the clean product
+    // 6. Draw Reflection (Middle Layer 2) - MUST be before Product
     if (reflectionOptions && reflectionOptions.opacity > 0) {
-      // GAP FIX: Overlap by 2 pixels so subject covers the seam
-      const GAP_OVERLAP = 2;
-      const productRect = layout.productRect;
       const adjustedReflectionRect = {
-        x: productRect.x,
-        y: productRect.y + productRect.height - GAP_OVERLAP, // Overlap by 2px
-        width: productRect.width,
-        height: Math.round(productRect.height * 0.6) // Only need 60% height
+        x: layout.productRect.x,
+        y: productY + layout.productRect.height - GAP, // Use lifted productY
+        width: layout.productRect.width,
+        height: reflectionHeight
       };
       
       await drawReflection(ctx, cleanSubjectImg, adjustedReflectionRect, reflectionOptions);
     }
 
-    // 7. Draw clean product on top
-    const productRect = layout.productRect;
-    ctx.drawImage(cleanSubjectImg, productRect.x, productRect.y, productRect.width, productRect.height);
+    // 7. Draw Clean Product (Top Layer)
+    ctx.drawImage(
+        cleanSubjectImg, 
+        layout.productRect.x, 
+        productY, // Use lifted Y
+        layout.productRect.width, 
+        layout.productRect.height
+    );
 
     // 8. Export to blob
     const blob = await new Promise<Blob | null>((resolve) => {
