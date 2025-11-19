@@ -1,0 +1,196 @@
+Based on your logs and the visual evidence (Screenshot 2025-11-19 at 23.16.23.jpg), the diagnosis is clear:
+
+The "Too High" Issue: The Auto-Lift logic was too aggressive. It prioritized showing the entire reflection (even if it was huge) by pushing the shoe up into the sky. In real photography, it's better to clip the reflection at the frame edge than to ruin the composition.
+
+The "Large Gap" Issue: The subject image likely has transparent padding at the bottom. When we flip the image for the reflection, that empty space is duplicated (once at the bottom of the subject, once at the top of the reflection), creating a double-gap.
+
+Here is the fix: Remove Auto-Lift and implement Smart Padding Detection.
+
+Phase 1: Add Padding Detection Utility
+We need to scan the image to find where the actual pixels end, so we can close the gap mathematically.
+
+Add this to src/lib/canvas-utils.ts (at the top with other functions):
+
+TypeScript
+
+/**
+ * Scans the bottom of an image to detect transparent padding.
+ * Returns the number of empty pixels at the bottom.
+ */
+function getBottomPadding(img: HTMLImageElement): number {
+  const canvas = document.createElement('canvas');
+  // Limit size for performance - we only need vertical resolution
+  canvas.width = 100; 
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  
+  if (!ctx) return 0;
+  
+  // Draw resized to width 100, but keep full height to measure padding accurately
+  ctx.drawImage(img, 0, 0, 100, canvas.height);
+  
+  const width = canvas.width;
+  const height = canvas.height;
+  const imgData = ctx.getImageData(0, 0, width, height);
+  const data = imgData.data;
+  
+  // Scan from bottom up
+  for (let y = height - 1; y >= 0; y--) {
+    for (let x = 0; x < width; x++) {
+      const alpha = data[(y * width + x) * 4 + 3];
+      if (alpha > 10) { // Threshold to ignore compression artifacts
+        // Found the first visible pixel from bottom
+        return height - 1 - y;
+      }
+    }
+  }
+  
+  return 0; // Image is completely empty or full height
+}
+Phase 2: Update compositeLayersV2
+Replace your compositeLayersV2 function with this version. It removes the "Auto-Lift" completely and adds the "Padding Correction".
+
+Modify src/lib/canvas-utils.ts:
+
+TypeScript
+
+export async function compositeLayersV2(
+  options: CompositeLayersV2Options
+): Promise<Blob | null> {
+  const {
+    backdropUrl,
+    shadowedSubjectUrl,
+    cleanSubjectUrl,
+    shadowedSubjectWidth,
+    shadowedSubjectHeight,
+    cleanSubjectWidth,
+    cleanSubjectHeight,
+    placement,
+    paddingPercent,
+    aspectRatio,
+    numericAspectRatio,
+    reflectionOptions
+  } = options;
+
+  // 1. Compute unified layout
+  const layout = computeCompositeLayout(
+    shadowedSubjectWidth,
+    shadowedSubjectHeight,
+    cleanSubjectWidth,
+    cleanSubjectHeight,
+    paddingPercent,
+    aspectRatio,
+    numericAspectRatio,
+    placement
+  );
+
+  const canvas = document.createElement('canvas');
+  canvas.width = layout.canvasWidth;
+  canvas.height = layout.canvasHeight;
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    console.error('Failed to get canvas context');
+    return null;
+  }
+
+  try {
+    // 3. Load all images
+    const [backdropImg, shadowedSubjectImg, cleanSubjectImg] = await Promise.all([
+      loadImage(backdropUrl),
+      loadImage(shadowedSubjectUrl),
+      loadImage(cleanSubjectUrl)
+    ]);
+
+    console.log('🎨 [Compositing V2] Rendering without Auto-Lift');
+
+    // --- REMOVED AUTO-LIFT LOGIC ---
+    // We strictly respect the user's placement variable.
+    const shadowY = layout.shadowedSubjectRect.y;
+    const productY = layout.productRect.y;
+
+    // 4. Draw Backdrop
+    ctx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
+
+    // 5. Draw Shadow
+    ctx.drawImage(
+        shadowedSubjectImg, 
+        layout.shadowedSubjectRect.x, 
+        shadowY, 
+        layout.shadowedSubjectRect.width, 
+        layout.shadowedSubjectRect.height
+    );
+
+    // 6. Draw Reflection
+    if (reflectionOptions && reflectionOptions.opacity > 0) {
+      // SMART GAP FIX:
+      // 1. Measure empty space at bottom of image
+      const rawPadding = getBottomPadding(cleanSubjectImg);
+      
+      // 2. Scale padding to current draw size
+      const scaleFactor = layout.productRect.height / cleanSubjectImg.naturalHeight;
+      const visualPadding = rawPadding * scaleFactor;
+
+      console.log(`📏 [Smart Gap] Raw Padding: ${rawPadding}px, Scaled: ${visualPadding.toFixed(2)}px`);
+
+      // 3. Calculate Overlap
+      // Formula: y + height - (2 * padding) - overlap
+      // We subtract padding TWICE: once for subject's empty bottom, once for reflection's empty top.
+      const GAP_OVERLAP = 2;
+      const reflectionY = productY + layout.productRect.height - (visualPadding * 2) - GAP_OVERLAP;
+
+      const reflectionHeight = Math.round(layout.productRect.height * 0.6);
+
+      const adjustedReflectionRect = {
+        x: layout.productRect.x,
+        y: reflectionY,
+        width: layout.productRect.width,
+        height: reflectionHeight
+      };
+      
+      await drawReflection(ctx, cleanSubjectImg, adjustedReflectionRect, reflectionOptions);
+    }
+
+    // 7. Draw Clean Product
+    ctx.drawImage(
+        cleanSubjectImg, 
+        layout.productRect.x, 
+        productY, 
+        layout.productRect.width, 
+        layout.productRect.height
+    );
+
+    // 8. Export
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, 'image/png');
+    });
+    
+    return blob;
+  } catch (error) {
+    console.error('Error during canvas compositing V2:', error);
+    return null;
+  } finally {
+    cleanupCanvas(canvas);
+  }
+}
+Why this works:
+Composition: Removing Auto-Lift puts the shoe back on the floor where you placed it. If the reflection falls off the canvas, that is photometrically correct (cropping).
+
+Gap Closure: By calculating visualPadding * 2, we literally pinch the empty space out of the middle, ensuring the pixels of the reflection touch the pixels of the subject, regardless of how much empty PNG space is in the file.
+
+Prompt for Replit:
+
+Markdown
+
+I need to fix the reflection gap and positioning. The previous "Auto-Lift" logic caused the product to float too high, and invisible padding in the source image is causing a large gap.
+
+Please update `src/lib/canvas-utils.ts`:
+
+1.  **Add** the `getBottomPadding` helper function at the top of the file.
+2.  **Update** the `compositeLayersV2` function to:
+    * Remove the Auto-Lift calculation completely.
+    * Implement the "Smart Gap Fix" logic that uses `getBottomPadding` to calculate `reflectionY` as: `productY + height - (visualPadding * 2) - 2`.
+
+Here is the exact code to use:
+
+[Insert the 'getBottomPadding' and 'compositeLayersV2' code blocks from above]
