@@ -1,0 +1,33 @@
+## Task: Refactor Auto-Deskew Algorithm in `src/lib/image-rotation-utils.ts`
+
+The current auto-deskew implementation is failing on textured objects (like denim bags) and objects with rounded corners. The current approach of using flood-fill and fixed-percentage canvas sampling is incorrect for transparent PNGs.
+
+Please completely rewrite `src/lib/image-rotation-utils.ts` with the following robust architecture:
+
+### 1. Logic Overhaul
+Instead of complex component extraction, use **Alpha Channel Scanning** to find the object's "feet":
+1. **Detect Object Bounds:** First, scan the alpha channel to find the `minY` and `maxY` of the actual object (ignoring empty canvas space).
+2. **Column Scanning:** Iterate through the X-axis columns. For each column, find the lowest pixel where `alpha > 200` (strict threshold to ignore denim fuzz/shadows).
+3. **Candidate Collection:** Store these `(x, y)` points. This represents the bottom contour of the object.
+
+### 2. The "Smart" RANSAC Implementation
+Replace the current angle calculation with this robust RANSAC approach:
+1. **Filter Outliers:** Ignore the first 15% and last 15% of the X-axis width points. This automatically removes the "curved corners" of bags/bottles that throw off the calculation.
+2. **Run RANSAC:**
+   - Randomly select 2 points from the remaining central bottom points.
+   - Calculate the line.
+   - Count "inliers" (points within **5px** distance of the line - increased from 2.5px to handle fabric texture).
+   - Repeat 200 times.
+3. **Consensus Check:** If the best line has < 25% of points agreeing, return 0 (do not rotate). This prevents "forcing" a rotation on circular or irregular objects.
+
+### 3. Code Structure
+Export these two main functions:
+- `detectSkewAngle(imageSrc: string, canvas: HTMLCanvasElement): Promise<number>`
+- `rotateImage(imageSrc: string, angleDegrees: number): Promise<string>` (Use the translate-rotate-draw method to center the image).
+
+### Requirements
+- **No external heavy libraries** (like OpenCV). Use raw Canvas API `getImageData`.
+- **Performance:** Resize the analysis canvas to max-width 600px before processing to save CPU.
+- **Safety:** Clamp max rotation to +/- 15 degrees. If calculated > 15, return 0.
+
+Please provide the complete, updated code for `src/lib/image-rotation-utils.ts`.
