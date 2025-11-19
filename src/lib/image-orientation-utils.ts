@@ -530,7 +530,13 @@ export const autoDeskewSubject = async (
               rotCtx.drawImage(rotImg, -rotImg.width / 2, -rotImg.height / 2);
               rotCtx.restore();
               
-              rotResolve(rotCanvas.toDataURL('image/png'));
+              const result = rotCanvas.toDataURL('image/png');
+              
+              // Clean up rotation canvas to free memory
+              rotCanvas.width = 0;
+              rotCanvas.height = 0;
+              
+              rotResolve(result);
             };
             rotImg.onerror = () => rotReject(new Error('Failed to load image for rotation'));
             rotImg.src = imageUrl;
@@ -541,6 +547,10 @@ export const autoDeskewSubject = async (
         const cleanRotatedDataUrl = cleanImageDataUrl 
           ? await rotateImageByAngle(cleanImageDataUrl, angleDegrees)
           : null;
+        
+        // Clean up main analysis canvas to free memory
+        canvas.width = 0;
+        canvas.height = 0;
         
         resolve({
           rotatedDataUrl,
@@ -659,6 +669,10 @@ export const correctImageOrientation = async (file: File): Promise<File> => {
       type: blob.type,
       lastModified: Date.now(),
     });
+    
+    // Clean up canvas to free memory
+    canvas.width = 0;
+    canvas.height = 0;
     
     console.log(`[ORIENTATION] ✓ Corrected from orientation ${orientation} to 1`);
     return correctedFile;

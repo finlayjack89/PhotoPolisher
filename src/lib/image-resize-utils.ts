@@ -2,6 +2,8 @@
  * Utility functions for resizing images to prevent Edge Function memory issues
  */
 
+import { cleanupCanvas } from '@/lib/canvas-utils';
+
 /**
  * Load an image from a URL
  */
@@ -81,67 +83,72 @@ export const processAndCompressImage = (file: File, originalFileSize?: number): 
         console.log(`Starting compression: ${currentWidth}x${currentHeight}`);
         
         const compressLoop = async () => {
-          let bestBlob: Blob | null = null;
-          let lastBlob: Blob | null = null;
-          let iterations = 0;
-          const maxIterations = 25; // Prevent infinite loop
-          
-          // Try progressive dimension reduction (2% each step) until we hit target size
-          while (iterations < maxIterations) {
-            canvas.width = currentWidth;
-            canvas.height = currentHeight;
-            ctx.clearRect(0, 0, currentWidth, currentHeight);
-            ctx.drawImage(img, 0, 0, currentWidth, currentHeight);
+          try {
+            let bestBlob: Blob | null = null;
+            let lastBlob: Blob | null = null;
+            let iterations = 0;
+            const maxIterations = 25; // Prevent infinite loop
             
-            // Create PNG blob
-            const compressedBlob: Blob = await new Promise((res) => {
-              canvas.toBlob(
-                (b) => res(b as Blob),
-                'image/png',
-                1.0 // PNG ignores quality but we set to 1.0 for clarity
-              );
-            });
-            
-            lastBlob = compressedBlob; // Keep track of the last blob
-            
-            console.log(`Iteration ${iterations + 1}: ${currentWidth}x${currentHeight}, Size: ${(compressedBlob.size / (1024 * 1024)).toFixed(2)}MB`);
-            
-            // Check if we're in the target range (7MB - 8MB)
-            if (compressedBlob.size >= SIZE_7MB && compressedBlob.size <= SIZE_8MB) {
-              console.log(`Target reached: ${(compressedBlob.size / (1024 * 1024)).toFixed(2)}MB`);
-              return resolve(compressedBlob);
-            }
-            
-            // If we've compressed below 7MB, use the previous iteration if available
-            if (compressedBlob.size < SIZE_7MB) {
-              if (bestBlob && bestBlob.size >= SIZE_7MB) {
-                console.log(`Using previous iteration: ${(bestBlob.size / (1024 * 1024)).toFixed(2)}MB`);
+            // Try progressive dimension reduction (2% each step) until we hit target size
+            while (iterations < maxIterations) {
+              canvas.width = currentWidth;
+              canvas.height = currentHeight;
+              ctx.clearRect(0, 0, currentWidth, currentHeight);
+              ctx.drawImage(img, 0, 0, currentWidth, currentHeight);
+              
+              // Create PNG blob
+              const compressedBlob: Blob = await new Promise((res) => {
+                canvas.toBlob(
+                  (b) => res(b as Blob),
+                  'image/png',
+                  1.0 // PNG ignores quality but we set to 1.0 for clarity
+                );
+              });
+              
+              lastBlob = compressedBlob; // Keep track of the last blob
+              
+              console.log(`Iteration ${iterations + 1}: ${currentWidth}x${currentHeight}, Size: ${(compressedBlob.size / (1024 * 1024)).toFixed(2)}MB`);
+              
+              // Check if we're in the target range (7MB - 8MB)
+              if (compressedBlob.size >= SIZE_7MB && compressedBlob.size <= SIZE_8MB) {
+                console.log(`Target reached: ${(compressedBlob.size / (1024 * 1024)).toFixed(2)}MB`);
+                return resolve(compressedBlob);
+              }
+              
+              // If we've compressed below 7MB, use the previous iteration if available
+              if (compressedBlob.size < SIZE_7MB) {
+                if (bestBlob && bestBlob.size >= SIZE_7MB) {
+                  console.log(`Using previous iteration: ${(bestBlob.size / (1024 * 1024)).toFixed(2)}MB`);
+                  return resolve(bestBlob);
+                }
+                // If no suitable previous blob, use current (better than nothing)
+                console.log(`Below target but using current: ${(compressedBlob.size / (1024 * 1024)).toFixed(2)}MB`);
+                return resolve(compressedBlob);
+              }
+              
+              // Store current blob as potential best option
+              bestBlob = compressedBlob;
+              
+              // Reduce dimensions by 2% for next iteration
+              currentWidth = Math.floor(currentWidth * 0.98);
+              currentHeight = Math.floor(currentHeight * 0.98);
+              
+              // Don't go below reasonable minimum
+              if (currentWidth < 512 || currentHeight < 512) {
+                console.log(`Minimum dimensions reached, using best available: ${(bestBlob.size / (1024 * 1024)).toFixed(2)}MB`);
                 return resolve(bestBlob);
               }
-              // If no suitable previous blob, use current (better than nothing)
-              console.log(`Below target but using current: ${(compressedBlob.size / (1024 * 1024)).toFixed(2)}MB`);
-              return resolve(compressedBlob);
+              
+              iterations++;
             }
             
-            // Store current blob as potential best option
-            bestBlob = compressedBlob;
-            
-            // Reduce dimensions by 2% for next iteration
-            currentWidth = Math.floor(currentWidth * 0.98);
-            currentHeight = Math.floor(currentHeight * 0.98);
-            
-            // Don't go below reasonable minimum
-            if (currentWidth < 512 || currentHeight < 512) {
-              console.log(`Minimum dimensions reached, using best available: ${(bestBlob.size / (1024 * 1024)).toFixed(2)}MB`);
-              return resolve(bestBlob);
-            }
-            
-            iterations++;
+            // Fallback: return the best blob we have
+            console.log(`Max iterations reached, using best: ${bestBlob ? (bestBlob.size / (1024 * 1024)).toFixed(2) : 'none'}MB`);
+            return resolve(bestBlob || lastBlob!);
+          } finally {
+            // Clean up canvas to free memory on ALL code paths
+            cleanupCanvas(canvas);
           }
-          
-          // Fallback: return the best blob we have
-          console.log(`Max iterations reached, using best: ${bestBlob ? (bestBlob.size / (1024 * 1024)).toFixed(2) : 'none'}MB`);
-          return resolve(bestBlob || lastBlob!);
         };
         
         compressLoop();

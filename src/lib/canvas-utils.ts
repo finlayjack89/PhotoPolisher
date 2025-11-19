@@ -1,6 +1,21 @@
 // src/lib/canvas-utils.ts
 import { loadImage } from './file-utils';
 
+/**
+ * Clean up a canvas to hint garbage collection to free memory faster.
+ * This is critical for batch processing of large images to prevent memory buildup.
+ * 
+ * @param canvas - The canvas element to clean up
+ */
+export function cleanupCanvas(canvas: HTMLCanvasElement): void {
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
 export interface SubjectPlacement {
   x: number; // Horizontal position (0-1, where 0.5 is center)
   y: number; // Vertical position (0-1, where 0 is top, 1 is bottom)
@@ -279,6 +294,9 @@ function drawReflection(
   ctx.drawImage(tempCanvas, x, y);
   ctx.globalAlpha = 1.0;
 
+  // 4. Clean up temporary canvas to free memory
+  cleanupCanvas(tempCanvas);
+
   console.log('🪞 [Reflection] Drawn at:', {
     position: { x, y },
     dimensions: { width, height },
@@ -373,12 +391,17 @@ export async function compositeLayers(
     ctx.drawImage(subjectImg, finalX, finalY, subjectLayer.width, subjectLayer.height);
 
     // Export to blob
-    return new Promise((resolve) => {
+    const blob = await new Promise<Blob | null>((resolve) => {
       canvas.toBlob(resolve, 'image/png');
     });
+    
+    return blob;
   } catch (error) {
     console.error('Error during canvas compositing:', error);
     return null;
+  } finally {
+    // Clean up canvas to free memory
+    cleanupCanvas(canvas);
   }
 }
 
@@ -468,12 +491,17 @@ export async function compositeLayersV2(
     const productRect = layout.productRect;
     ctx.drawImage(cleanSubjectImg, productRect.x, productRect.y, productRect.width, productRect.height);
 
-    // 7. Export to blob
-    return new Promise((resolve) => {
+    // 8. Export to blob
+    const blob = await new Promise<Blob | null>((resolve) => {
       canvas.toBlob(resolve, 'image/png');
     });
+    
+    return blob;
   } catch (error) {
     console.error('Error during canvas compositing V2:', error);
     return null;
+  } finally {
+    // Clean up canvas to free memory
+    cleanupCanvas(canvas);
   }
 }

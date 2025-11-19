@@ -165,10 +165,19 @@ export const generateReflection = async (
             ctx.globalCompositeOperation = "source-over";
             ctx.drawImage(tempCanvas, 0, 0);
           }
+          
+          // Clean up temporary blur canvas to free memory
+          tempCanvas.width = 0;
+          tempCanvas.height = 0;
         }
 
         const result = canvas.toDataURL("image/png");
         console.log("✅ Reflection generated successfully");
+        
+        // Clean up canvas to free memory
+        canvas.width = 0;
+        canvas.height = 0;
+        
         resolve(result);
       } catch (error) {
         console.error("Error generating reflection:", error);
