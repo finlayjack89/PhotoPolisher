@@ -211,34 +211,60 @@ export async function generateSmartReflection(
   blur: number = 4,
   opacity: number = 0.25
 ): Promise<HTMLCanvasElement> {
+  console.log('🪞 [SmartReflection] Starting generation:', {
+    width,
+    height,
+    blur,
+    opacity,
+    imgNaturalWidth: img.naturalWidth,
+    imgNaturalHeight: img.naturalHeight
+  });
+
+  // Validate dimensions
+  if (width <= 0 || height <= 0) {
+    console.error('🪞 [SmartReflection] Invalid dimensions:', { width, height });
+    throw new Error(`Invalid reflection dimensions: width=${width}, height=${height}`);
+  }
+
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
 
-  if (!ctx) throw new Error('Could not get context for smart reflection');
+  if (!ctx) {
+    console.error('🪞 [SmartReflection] Failed to get canvas context');
+    throw new Error('Could not get context for smart reflection');
+  }
 
-  // 1. Vertical Flip & Surface Diffusion
-  ctx.save();
-  ctx.translate(0, height);
-  ctx.scale(1, -1);
-  ctx.filter = `blur(${blur}px)`; // Simulates glossy floor diffusion
-  ctx.drawImage(img, 0, 0, width, height);
-  ctx.restore();
+  try {
+    // 1. Vertical Flip & Surface Diffusion
+    console.log('🪞 [SmartReflection] Step 1: Applying vertical flip and blur');
+    ctx.save();
+    ctx.translate(0, height);
+    ctx.scale(1, -1);
+    ctx.filter = `blur(${blur}px)`; // Simulates glossy floor diffusion
+    ctx.drawImage(img, 0, 0, width, height);
+    ctx.restore(); // IMPORTANT: Restore before gradient mask
 
-  // 2. Gradient Mask (Distance Falloff) - Fresnel effect
-  ctx.globalCompositeOperation = 'destination-in';
-  const gradient = ctx.createLinearGradient(0, 0, 0, height);
-  gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');     // Full visibility at touch point
-  gradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.6)'); // Mid-fade
-  gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');     // Invisible at bottom
-  
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, width, height);
+    // 2. Gradient Mask (Distance Falloff) - Fresnel effect
+    console.log('🪞 [SmartReflection] Step 2: Applying Fresnel gradient mask');
+    ctx.globalCompositeOperation = 'destination-in';
+    const gradient = ctx.createLinearGradient(0, 0, 0, height);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');     // Full visibility at touch point
+    gradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.6)'); // Mid-fade
+    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');     // Invisible at bottom
+    
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
 
-  ctx.globalCompositeOperation = 'source-over';
+    ctx.globalCompositeOperation = 'source-over';
 
-  return canvas;
+    console.log('🪞 [SmartReflection] ✅ Generation complete');
+    return canvas;
+  } catch (error) {
+    console.error('🪞 [SmartReflection] ❌ Error during generation:', error);
+    throw error;
+  }
 }
 
 /**

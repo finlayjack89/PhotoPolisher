@@ -345,27 +345,47 @@ export async function compositeLayers(
 
     // Draw reflection if enabled
     if (reflectionOptions && reflectionOptions.opacity > 0) {
-      const productOffsetX = (subjectLayer.width - cleanW) / 2;
-      const productOffsetY = (subjectLayer.height - cleanH) / 2;
-      const actualProductX = finalX + productOffsetX;
-      const actualProductY = finalY + productOffsetY;
+      try {
+        console.log('🪞 [compositeLayers] Starting reflection generation');
+        
+        const productOffsetX = (subjectLayer.width - cleanW) / 2;
+        const productOffsetY = (subjectLayer.height - cleanH) / 2;
+        const actualProductX = finalX + productOffsetX;
+        const actualProductY = finalY + productOffsetY;
 
-      const estimatedScale = Math.min(
-        (subjectLayer.width / 1.5) / cleanW,
-        (subjectLayer.height / 1.5) / cleanH
-      );
+        const estimatedScale = Math.min(
+          (subjectLayer.width / 1.5) / cleanW,
+          (subjectLayer.height / 1.5) / cleanH
+        );
 
-      await drawReflection(
-        ctx,
-        cleanSubjectImg,
-        {
-          x: Math.round(actualProductX),
-          y: Math.round(actualProductY + cleanH * estimatedScale),
-          width: Math.round(cleanW * estimatedScale),
-          height: Math.round(cleanH * estimatedScale)
-        },
-        reflectionOptions
-      );
+        // Calculate reflection dimensions with safety checks
+        const reflectionWidth = Math.round(cleanW * estimatedScale);
+        const reflectionHeight = Math.max(1, Math.round(cleanH * estimatedScale)); // Ensure at least 1px
+        
+        console.log('🪞 [compositeLayers] Reflection params:', {
+          reflectionWidth,
+          reflectionHeight,
+          estimatedScale,
+          opacity: reflectionOptions.opacity
+        });
+
+        await drawReflection(
+          ctx,
+          cleanSubjectImg,
+          {
+            x: Math.floor(actualProductX), // Use floor to avoid sub-pixel rendering
+            y: Math.floor(actualProductY + cleanH * estimatedScale),
+            width: reflectionWidth,
+            height: reflectionHeight
+          },
+          reflectionOptions
+        );
+        
+        console.log('🪞 [compositeLayers] ✅ Reflection generation complete');
+      } catch (error) {
+        console.error('🪞 [compositeLayers] ❌ Reflection generation failed:', error);
+        // Continue without reflection rather than failing entire composite
+      }
     }
 
     // Draw shadowed subject on top

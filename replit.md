@@ -49,6 +49,12 @@ Preferred communication style: Simple, everyday language.
 - **Cloudinary Request Queuing**: Queue-based processing via `processQueue()` utility limits concurrent Cloudinary API requests to 3, preventing rate limiting on free/starter plans while maintaining good throughput. FIFO ordering with per-item error handling allows individual failures without breaking entire batch. Progress logging shows completed/total/active request counts. Automatically adjusts worker count for small batches (e.g., 2 items = 2 workers).
 - **Granular Progress Tracking**: Per-image status tracking with monotonic state progression (pending → uploading → compressing → shadowing → compositing → complete) displayed in real-time UI. Map-based state management with color-coded status icons (Clock, Upload, Minimize2, Moon, Wand2, CheckCircle, AlertCircle) and smart sorting (errors/active at top, completed at bottom). Handles both fresh shadow jobs (full pipeline) and cached shadows (abbreviated flow with cache indicators). ScrollArea component manages large batches efficiently with inline error messages and timing delays ensuring visibility of each step.
 
+### Studio-Grade Reflection System (November 2025)
+- **Smart Reflection Generator**: New `generateSmartReflection()` function uses ctx.filter for performance-optimized blur (4px default), Fresnel falloff gradient (0%, 40%, 100% stops), and destination-in compositing for photorealistic product reflections with default opacity 0.25 for professional subtle appearance.
+- **Seamless Layer Compositing**: 2px overlap between product and reflection eliminates anti-aliasing gaps. Proper z-ordering ensures reflection renders beneath subject in both legacy `compositeLayers` and modern `compositeLayersV2` code paths with async/await guarantees.
+- **Robust Error Handling**: Comprehensive logging with 🪞 [SmartReflection] and 🪞 [compositeLayers] prefixes for debugging. Validates dimensions (prevents 0-width/0-height errors), ensures minimum 1px reflection height, uses Math.floor for sub-pixel rendering prevention. Try-catch blocks allow graceful degradation—composite continues without reflection if generation fails rather than failing entire operation.
+- **Canvas Context Management**: Explicit ctx.restore() called before gradient mask application to prevent filter bleeding into subsequent operations. Proper cleanup and error logging at each step for production reliability.
+
 ## External Dependencies
 
 ### AI & Image Processing Services
