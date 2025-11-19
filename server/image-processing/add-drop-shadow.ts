@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import type { IStorage } from '../storage';
 import { fetchWithTimeout, retryWithBackoff } from '../utils/fetch-utils';
 import { calculateTimeout, getImageSizeFromBase64 } from '../utils/timeout-utils';
+import { processQueue } from '../utils/queue-utils';
 
 export interface AddDropShadowRequest {
   images?: Array<{
@@ -150,175 +151,178 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
   }
 
   console.log(`Processing ${imagesToProcess.length} images for drop shadow with params: azimuth=${azimuth}, elevation=${elevation}, spread=${spread}, opacity=${opacity}`);
+  console.log(`Using queue with max 3 concurrent Cloudinary requests`);
 
-  const processedImages = [];
   const batchStartTime = Date.now();
 
-  for (let i = 0; i < imagesToProcess.length; i++) {
-    const img = imagesToProcess[i];
-    console.log(`Processing image ${i + 1}/${imagesToProcess.length}: ${img.name}`);
-
-    try {
-      // Skip if no data (file not found)
-      if (!img.data) {
-        processedImages.push({
-          name: img.name,
-          shadowedData: '',
-          shadowedFileId: undefined,
-          error: 'File not found in storage',
-        });
-        continue;
-      }
-
-      const imageStartTime = Date.now();
-      const timestamp = Math.floor(Date.now() / 1000);
-      const folder = 'drop_shadow_temp';
-      const signatureString = `folder=${folder}&timestamp=${timestamp}${apiSecret}`;
-      const uploadSignature = await generateSignature(signatureString, apiSecret);
-
-      const uploadData = new FormData();
-      uploadData.append('file', img.data);
-      uploadData.append('api_key', apiKey);
-      uploadData.append('timestamp', timestamp.toString());
-      uploadData.append('signature', uploadSignature);
-      uploadData.append('folder', folder);
-
-      console.log(`Uploading ${img.name} to Cloudinary with signed upload...`);
-
-      // Calculate timeout based on image size
-      const imageSize = getImageSizeFromBase64(img.data);
-      const uploadTimeout = calculateTimeout('upload', imageSize);
-
-      const uploadStartTime = Date.now();
-      // Use timeout and retry logic for image upload
-      const uploadResponse = await retryWithBackoff(
-        () => fetchWithTimeout(
-          `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
-          {
-            method: 'POST',
-            body: uploadData,
-          },
-          uploadTimeout,
-          `Cloudinary upload: ${img.name}`
-        )
-      );
-      const uploadMs = Math.round(Date.now() - uploadStartTime);
-
-      if (!uploadResponse.ok) {
-        const errorText = await uploadResponse.text();
-        console.error(`Upload failed for ${img.name}:`, errorText);
-        throw new Error(`Upload failed: ${uploadResponse.status} - ${errorText}`);
-      }
-
-      const uploadResult = await uploadResponse.json() as any;
-      console.log(`✅ Uploaded ${img.name} to Cloudinary:`, uploadResult.public_id);
-
-      const paddingMultiplier = Math.max(1.5, 1 + (spread / 100));
-      console.log(`Using padding multiplier: ${paddingMultiplier}x for spread: ${spread}`);
-
-      // --- MODIFIED LINE ---
-      // Added opacity (co_rgb:000,o_OPACITY) to the drop shadow effect
-      const transformedUrl = `https://res.cloudinary.com/${cloudName}/image/upload/c_lpad,w_iw_mul_${paddingMultiplier},h_ih_mul_${paddingMultiplier},b_transparent/e_dropshadow:azimuth_${azimuth};elevation_${elevation};spread_${spread},co_rgb:000,o_${opacity}/${uploadResult.public_id}.png`;
-      // --- END MODIFIED LINE ---
-
-      console.log(`Transformation URL: ${transformedUrl}`);
-
-      // Calculate timeout for shadow transformation (reuse imageSize from upload)
-      const shadowTimeout = calculateTimeout('shadow', imageSize);
-
-      const transformStartTime = Date.now();
-      // Use timeout and retry logic for transformed image fetch
-      const transformedResponse = await retryWithBackoff(
-        () => fetchWithTimeout(transformedUrl, {}, shadowTimeout, `Cloudinary transform: ${img.name}`)
-      );
-
-      if (!transformedResponse.ok) {
-        throw new Error(`Failed to fetch transformed image: ${transformedResponse.status}`);
-      }
-
-      const transformedBuffer = await transformedResponse.arrayBuffer();
-      const base64 = Buffer.from(transformedBuffer).toString('base64');
-      const transformMs = Math.round(Date.now() - transformStartTime);
-
-      const shadowedDataUrl = `data:image/png;base64,${base64}`;
-
-      // Store shadowedData as file for file ID architecture (Phase 1 optimization)
-      let shadowedFileId: string | undefined;
-      if (storage) {
-        try {
-          const buffer = Buffer.from(transformedBuffer);
-          const shadowedFile = await storage.createFile(
-            {
-              storageKey: `shadows/${Date.now()}-${img.name}`,
-              mimeType: 'image/png',
-              bytes: buffer.length,
-              originalFilename: `shadow-${img.name}`,
-            },
-            buffer
-          );
-          shadowedFileId = shadowedFile.id;
-          console.log(`💾 Stored shadow as file: ${shadowedFileId} (${buffer.length} bytes)`);
-        } catch (storageError) {
-          console.warn(`Failed to store shadow as file for ${img.name}:`, storageError);
-        }
-      }
-
-      processedImages.push({
-        name: img.name,
-        shadowedData: shadowedDataUrl,
-        shadowedFileId,
-      });
-
-      console.log(`✅ Successfully added shadow to ${img.name}`);
-
-      // Cleanup
-      const cleanupStartTime = Date.now();
-      let cleanupMs = 0;
+  // Process images with controlled concurrency
+  const processedImages = await processQueue(
+    imagesToProcess,
+    async (img, index) => {
       try {
-        const deleteTimestamp = Math.floor(Date.now() / 1000);
-        const deleteSignatureString = `public_id=${uploadResult.public_id}&timestamp=${deleteTimestamp}${apiSecret}`;
-        const deleteSignature = await generateSignature(deleteSignatureString, apiSecret);
+        // Skip if no data (file not found)
+        if (!img.data) {
+          return {
+            name: img.name,
+            shadowedData: '',
+            shadowedFileId: undefined,
+            error: 'File not found in storage',
+          };
+        }
 
-        const deleteData = new FormData();
-        deleteData.append('public_id', uploadResult.public_id);
-        deleteData.append('signature', deleteSignature);
-        deleteData.append('api_key', apiKey);
-        deleteData.append('timestamp', deleteTimestamp.toString());
+        const imageStartTime = Date.now();
+        const timestamp = Math.floor(Date.now() / 1000);
+        const folder = 'drop_shadow_temp';
+        const signatureString = `folder=${folder}&timestamp=${timestamp}${apiSecret}`;
+        const uploadSignature = await generateSignature(signatureString, apiSecret);
 
-        // Use timeout for cleanup (no retry needed for cleanup)
-        const cleanupTimeout = calculateTimeout('download');
-        const deleteResponse = await fetchWithTimeout(
-          `https://api.cloudinary.com/v1_1/${cloudName}/image/destroy`,
-          {
-            method: 'POST',
-            body: deleteData,
-          },
-          cleanupTimeout,
-          `Cloudinary cleanup: ${img.name}`
+        const uploadData = new FormData();
+        uploadData.append('file', img.data);
+        uploadData.append('api_key', apiKey);
+        uploadData.append('timestamp', timestamp.toString());
+        uploadData.append('signature', uploadSignature);
+        uploadData.append('folder', folder);
+
+        console.log(`Uploading ${img.name} to Cloudinary with signed upload...`);
+
+        // Calculate timeout based on image size
+        const imageSize = getImageSizeFromBase64(img.data);
+        const uploadTimeout = calculateTimeout('upload', imageSize);
+
+        const uploadStartTime = Date.now();
+        // Use timeout and retry logic for image upload
+        const uploadResponse = await retryWithBackoff(
+          () => fetchWithTimeout(
+            `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+            {
+              method: 'POST',
+              body: uploadData,
+            },
+            uploadTimeout,
+            `Cloudinary upload: ${img.name}`
+          )
+        );
+        const uploadMs = Math.round(Date.now() - uploadStartTime);
+
+        if (!uploadResponse.ok) {
+          const errorText = await uploadResponse.text();
+          console.error(`Upload failed for ${img.name}:`, errorText);
+          throw new Error(`Upload failed: ${uploadResponse.status} - ${errorText}`);
+        }
+
+        const uploadResult = await uploadResponse.json() as any;
+        console.log(`✅ Uploaded ${img.name} to Cloudinary:`, uploadResult.public_id);
+
+        const paddingMultiplier = Math.max(1.5, 1 + (spread / 100));
+        console.log(`Using padding multiplier: ${paddingMultiplier}x for spread: ${spread}`);
+
+        // Added opacity (co_rgb:000,o_OPACITY) to the drop shadow effect
+        const transformedUrl = `https://res.cloudinary.com/${cloudName}/image/upload/c_lpad,w_iw_mul_${paddingMultiplier},h_ih_mul_${paddingMultiplier},b_transparent/e_dropshadow:azimuth_${azimuth};elevation_${elevation};spread_${spread},co_rgb:000,o_${opacity}/${uploadResult.public_id}.png`;
+
+        console.log(`Transformation URL: ${transformedUrl}`);
+
+        // Calculate timeout for shadow transformation (reuse imageSize from upload)
+        const shadowTimeout = calculateTimeout('shadow', imageSize);
+
+        const transformStartTime = Date.now();
+        // Use timeout and retry logic for transformed image fetch
+        const transformedResponse = await retryWithBackoff(
+          () => fetchWithTimeout(transformedUrl, {}, shadowTimeout, `Cloudinary transform: ${img.name}`)
         );
 
-        if (deleteResponse.ok) {
-          console.log(`🗑️ Cleaned up temporary Cloudinary image: ${uploadResult.public_id}`);
+        if (!transformedResponse.ok) {
+          throw new Error(`Failed to fetch transformed image: ${transformedResponse.status}`);
         }
-        cleanupMs = Math.round(Date.now() - cleanupStartTime);
-      } catch (cleanupError) {
-        console.warn('Failed to cleanup Cloudinary image:', cleanupError);
-        cleanupMs = Math.round(Date.now() - cleanupStartTime);
+
+        const transformedBuffer = await transformedResponse.arrayBuffer();
+        const base64 = Buffer.from(transformedBuffer).toString('base64');
+        const transformMs = Math.round(Date.now() - transformStartTime);
+
+        const shadowedDataUrl = `data:image/png;base64,${base64}`;
+
+        // Store shadowedData as file for file ID architecture (Phase 1 optimization)
+        let shadowedFileId: string | undefined;
+        if (storage) {
+          try {
+            const buffer = Buffer.from(transformedBuffer);
+            const shadowedFile = await storage.createFile(
+              {
+                storageKey: `shadows/${Date.now()}-${img.name}`,
+                mimeType: 'image/png',
+                bytes: buffer.length,
+                originalFilename: `shadow-${img.name}`,
+              },
+              buffer
+            );
+            shadowedFileId = shadowedFile.id;
+            console.log(`💾 Stored shadow as file: ${shadowedFileId} (${buffer.length} bytes)`);
+          } catch (storageError) {
+            console.warn(`Failed to store shadow as file for ${img.name}:`, storageError);
+          }
+        }
+
+        console.log(`✅ Successfully added shadow to ${img.name}`);
+
+        // Cleanup
+        const cleanupStartTime = Date.now();
+        let cleanupMs = 0;
+        try {
+          const deleteTimestamp = Math.floor(Date.now() / 1000);
+          const deleteSignatureString = `public_id=${uploadResult.public_id}&timestamp=${deleteTimestamp}${apiSecret}`;
+          const deleteSignature = await generateSignature(deleteSignatureString, apiSecret);
+
+          const deleteData = new FormData();
+          deleteData.append('public_id', uploadResult.public_id);
+          deleteData.append('signature', deleteSignature);
+          deleteData.append('api_key', apiKey);
+          deleteData.append('timestamp', deleteTimestamp.toString());
+
+          // Use timeout for cleanup (no retry needed for cleanup)
+          const cleanupTimeout = calculateTimeout('download');
+          const deleteResponse = await fetchWithTimeout(
+            `https://api.cloudinary.com/v1_1/${cloudName}/image/destroy`,
+            {
+              method: 'POST',
+              body: deleteData,
+            },
+            cleanupTimeout,
+            `Cloudinary cleanup: ${img.name}`
+          );
+
+          if (deleteResponse.ok) {
+            console.log(`🗑️ Cleaned up temporary Cloudinary image: ${uploadResult.public_id}`);
+          }
+          cleanupMs = Math.round(Date.now() - cleanupStartTime);
+        } catch (cleanupError) {
+          console.warn('Failed to cleanup Cloudinary image:', cleanupError);
+          cleanupMs = Math.round(Date.now() - cleanupStartTime);
+        }
+
+        const totalImageMs = Math.round(Date.now() - imageStartTime);
+        console.log(`⏱️ [PERF] Shadow generation: ${img.name} took ${totalImageMs}ms (upload: ${uploadMs}ms, transform: ${transformMs}ms, cleanup: ${cleanupMs}ms)`);
+
+        return {
+          name: img.name,
+          shadowedData: shadowedDataUrl,
+          shadowedFileId,
+        };
+      } catch (imageError) {
+        console.error(`Failed to process ${img.name}:`, imageError);
+        return {
+          name: img.name,
+          shadowedData: img.data,
+          shadowedFileId: undefined,
+          error: imageError instanceof Error ? imageError.message : 'Unknown error',
+        };
       }
-
-      const totalImageMs = Math.round(Date.now() - imageStartTime);
-      console.log(`⏱️ [PERF] Shadow generation: ${img.name} took ${totalImageMs}ms (upload: ${uploadMs}ms, transform: ${transformMs}ms, cleanup: ${cleanupMs}ms)`);
-
-    } catch (imageError) {
-      console.error(`Failed to process ${img.name}:`, imageError);
-      processedImages.push({
-        name: img.name,
-        shadowedData: img.data,
-        shadowedFileId: undefined,
-        error: imageError instanceof Error ? imageError.message : 'Unknown error',
-      });
+    },
+    {
+      concurrency: 3,
+      onProgress: (completed, total, active) => {
+        console.log(`Shadow generation: [${completed}/${total}] images processed (${active} active requests)`);
+      }
     }
-  }
+  );
 
   const batchTotalMs = Math.round(Date.now() - batchStartTime);
   const successfulCount = processedImages.filter(img => !img.error).length;
