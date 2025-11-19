@@ -16,6 +16,7 @@
 
 import fetch from 'node-fetch';
 import { fetchWithTimeout } from '../utils/fetch-utils';
+import { calculateTimeout, getImageSizeFromBase64 } from '../utils/timeout-utils';
 
 interface RemoveBackgroundRequest {
   images: Array<{
@@ -26,7 +27,7 @@ interface RemoveBackgroundRequest {
 
 // Timeout and retry configuration
 const REPLICATE_REQUEST_TIMEOUT = 30000; // 30 seconds for initial request
-const MAX_POLLING_TIME = 120000; // 2 minutes max polling time
+const MAX_POLLING_TIME = 240000; // 4 minutes max polling time (accommodates 210s max bg-removal timeout with safety margin)
 const INITIAL_POLL_DELAY = 1000; // Start with 1 second
 const MAX_POLL_DELAY = 5000; // Max 5 seconds between polls
 
@@ -48,6 +49,10 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
     try {
       console.log(`Removing background from: ${image.name}`);
 
+      // Calculate timeout based on image size
+      const imageSize = getImageSizeFromBase64(image.data);
+      const bgRemovalTimeout = calculateTimeout('bg-removal', imageSize);
+
       const imageStartTime = Date.now();
       const predictionStartTime = Date.now();
       const response = await fetchWithTimeout(
@@ -66,7 +71,7 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
             }
           }),
         },
-        REPLICATE_REQUEST_TIMEOUT,
+        bgRemovalTimeout,
         `Replicate prediction start: ${image.name}`
       );
 
@@ -102,7 +107,7 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
               'Authorization': `Bearer ${REPLICATE_API_KEY}`,
             },
           },
-          REPLICATE_REQUEST_TIMEOUT,
+          bgRemovalTimeout,
           `Replicate status poll: ${image.name}`
         );
         
@@ -169,7 +174,8 @@ export async function removeBackgrounds(req: RemoveBackgroundRequest) {
         }
         
         const downloadStartTime = Date.now();
-        const imageResponse = await fetch(outputUrl);
+        const downloadTimeout = calculateTimeout('download');
+        const imageResponse = await fetchWithTimeout(outputUrl, {}, downloadTimeout, `Download result: ${image.name}`);
         const imageBuffer = await imageResponse.arrayBuffer();
         const base64 = Buffer.from(imageBuffer).toString('base64');
         const transparentDataUrl = `data:image/png;base64,${base64}`;

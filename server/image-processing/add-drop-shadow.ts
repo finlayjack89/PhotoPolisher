@@ -3,6 +3,7 @@ import FormData from 'form-data';
 import crypto from 'crypto';
 import type { IStorage } from '../storage';
 import { fetchWithTimeout, retryWithBackoff } from '../utils/fetch-utils';
+import { calculateTimeout, getImageSizeFromBase64 } from '../utils/timeout-utils';
 
 export interface AddDropShadowRequest {
   images?: Array<{
@@ -52,6 +53,10 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
     uploadData.append('signature', uploadSignature);
     uploadData.append('folder', folder);
 
+    // Calculate timeout based on image size
+    const previewImageSize = getImageSizeFromBase64(image.data);
+    const uploadTimeout = calculateTimeout('upload', previewImageSize);
+
     // Use timeout and retry logic for preview upload
     const uploadResponse = await retryWithBackoff(
       () => fetchWithTimeout(
@@ -60,7 +65,7 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
           method: 'POST',
           body: uploadData,
         },
-        30000
+        uploadTimeout
       )
     );
 
@@ -180,6 +185,10 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
 
       console.log(`Uploading ${img.name} to Cloudinary with signed upload...`);
 
+      // Calculate timeout based on image size
+      const imageSize = getImageSizeFromBase64(img.data);
+      const uploadTimeout = calculateTimeout('upload', imageSize);
+
       const uploadStartTime = Date.now();
       // Use timeout and retry logic for image upload
       const uploadResponse = await retryWithBackoff(
@@ -189,7 +198,7 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
             method: 'POST',
             body: uploadData,
           },
-          30000,
+          uploadTimeout,
           `Cloudinary upload: ${img.name}`
         )
       );
@@ -214,10 +223,13 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
 
       console.log(`Transformation URL: ${transformedUrl}`);
 
+      // Calculate timeout for shadow transformation (reuse imageSize from upload)
+      const shadowTimeout = calculateTimeout('shadow', imageSize);
+
       const transformStartTime = Date.now();
       // Use timeout and retry logic for transformed image fetch
       const transformedResponse = await retryWithBackoff(
-        () => fetchWithTimeout(transformedUrl, {}, 30000, `Cloudinary transform: ${img.name}`)
+        () => fetchWithTimeout(transformedUrl, {}, shadowTimeout, `Cloudinary transform: ${img.name}`)
       );
 
       if (!transformedResponse.ok) {
@@ -274,13 +286,14 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
         deleteData.append('timestamp', deleteTimestamp.toString());
 
         // Use timeout for cleanup (no retry needed for cleanup)
+        const cleanupTimeout = calculateTimeout('download');
         const deleteResponse = await fetchWithTimeout(
           `https://api.cloudinary.com/v1_1/${cloudName}/image/destroy`,
           {
             method: 'POST',
             body: deleteData,
           },
-          30000,
+          cleanupTimeout,
           `Cloudinary cleanup: ${img.name}`
         );
 
