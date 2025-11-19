@@ -1,5 +1,5 @@
 // src/lib/canvas-utils.ts
-import { loadImage } from './image-resize-utils';
+import { loadImage } from './file-utils';
 
 export interface SubjectPlacement {
   x: number; // Horizontal position (0-1, where 0.5 is center)

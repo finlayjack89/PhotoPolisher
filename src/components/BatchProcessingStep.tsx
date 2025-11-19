@@ -366,33 +366,31 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
       console.log(`✅ All batches completed: ${allShadowedImages.length} total images received`);
       setProgress(80);
       
-      // Count successful and failed images (must have non-empty shadowedData and no error)
+      // Count successful and failed images (must have shadowedData OR shadowedFileId, and no error)
       const successfulImages = allShadowedImages.filter(img => 
-        img.shadowedData && 
-        img.shadowedData.length > 0 && 
-        !img.error &&
-        img.shadowedData !== ''
+        ((img.shadowedData && img.shadowedData.length > 0 && img.shadowedData !== '') || img.shadowedFileId) &&
+        !img.error
       ).length;
       const failedImages = processedSubjects.length - allShadowedImages.length;
       const imagesWithErrors = allShadowedImages.filter(img => 
-        img.error || !img.shadowedData || img.shadowedData === ''
+        img.error || (!img.shadowedData && !img.shadowedFileId) || (img.shadowedData === '')
       ).length;
       const totalFailures = failedImages + imagesWithErrors;
       
       console.log(`📊 Shadow regeneration summary: ${successfulImages} successful, ${totalFailures} failed`);
       
-      // Update processed subjects with new shadowed data (only if valid)
+      // Update processed subjects with new shadowed data (store both shadowedData and shadowedFileId)
       const updatedSubjects = processedSubjects.map((subject, index) => {
         const shadowedImage = allShadowedImages.find(img => img.name === subject.name);
-        // Only update if shadowedData is valid (non-empty string with actual data)
+        // Update if we have shadowedData OR shadowedFileId (file ID architecture)
         if (shadowedImage && 
-            shadowedImage.shadowedData && 
-            shadowedImage.shadowedData.length > 0 &&
-            shadowedImage.shadowedData !== '' &&
+            ((shadowedImage.shadowedData && shadowedImage.shadowedData.length > 0 && shadowedImage.shadowedData !== '') || 
+             shadowedImage.shadowedFileId) &&
             !shadowedImage.error) {
           return {
             ...subject,
-            shadowedData: shadowedImage.shadowedData
+            shadowedData: shadowedImage.shadowedData,
+            shadowedFileId: shadowedImage.shadowedFileId
           };
         }
         return subject;
@@ -499,16 +497,20 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
 
         if (!cleanCutoutData) throw new Error("Missing cutout data");
 
-        // --- Step 2: Check if we have cached shadowed data ---
-        if (subject.shadowedData) {
+        // --- Step 2: Check if we have cached shadowed data (shadowedData or shadowedFileId) ---
+        if (subject.shadowedData || subject.shadowedFileId) {
           // Use cached shadowed data - create a pseudo-job that's already "completed"
-          console.log(`✅ Using cached shadowed data for ${name}`);
+          const shadowUrl = subject.shadowedFileId 
+            ? `/api/files/${subject.shadowedFileId}`  // File ID architecture - convert to URL
+            : subject.shadowedData;  // Legacy base64 data
+          
+          console.log(`✅ Using cached shadow for ${name} (${subject.shadowedFileId ? 'fileId: ' + subject.shadowedFileId : 'base64 data'})`);
           newJobs.push({
             name,
             jobId: `cached-${Date.now()}-${Math.random()}`, // Fake job ID
             cleanCutoutData,
             status: 'completed',
-            final_image_url: subject.shadowedData, // Use cached shadowed data
+            final_image_url: shadowUrl,
           });
         } else {
           // No cached data - create actual shadow job

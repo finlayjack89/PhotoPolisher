@@ -15,6 +15,7 @@
  */
 
 import fetch from 'node-fetch';
+import { fetchWithTimeout } from '../utils/fetch-utils';
 
 interface RemoveBackgroundRequest {
   images: Array<{
@@ -28,29 +29,6 @@ const REPLICATE_REQUEST_TIMEOUT = 30000; // 30 seconds for initial request
 const MAX_POLLING_TIME = 120000; // 2 minutes max polling time
 const INITIAL_POLL_DELAY = 1000; // Start with 1 second
 const MAX_POLL_DELAY = 5000; // Max 5 seconds between polls
-
-/**
- * Fetch with timeout
- */
-async function fetchWithTimeout(url: string, options: any, timeout: number): Promise<any> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
-  
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    return response;
-  } catch (error: any) {
-    clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      throw new Error('Request timeout');
-    }
-    throw error;
-  }
-}
 
 export async function removeBackgrounds(req: RemoveBackgroundRequest) {
   const REPLICATE_API_KEY = process.env.REPLICATE_API_KEY;

@@ -34,22 +34,22 @@ export const getImageDimensions = (file: File): Promise<{ width: number; height:
 };
 
 /**
- * Process and compress images only if they exceed 5MB
- * Images under 5MB are returned as-is without any processing
- * Images over 5MB are compressed to 4.5-5MB range using dimension-based compression for PNG
+ * Process and compress images only if they exceed 8MB (Phase 1 optimization)
+ * Images under 8MB are returned as-is without any processing
+ * Images over 8MB are compressed to 7-8MB range using dimension-based compression for PNG
  */
 export const processAndCompressImage = (file: File, originalFileSize?: number): Promise<Blob> => {
   return new Promise((resolve, reject) => {
     const originalSize = originalFileSize || file.size;
-    const SIZE_5MB = 5 * 1024 * 1024;
-    const SIZE_4_5MB = 4.5 * 1024 * 1024;
+    const SIZE_8MB = 8 * 1024 * 1024;
+    const SIZE_7MB = 7 * 1024 * 1024;
     
-    // If file is under 5MB, return as-is without any processing
-    if (originalSize <= SIZE_5MB) {
+    // If file is under 8MB, return as-is without any processing
+    if (originalSize <= SIZE_8MB) {
       return resolve(file);
     }
     
-    // Only process files over 5MB
+    // Only process files over 8MB
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = (event) => {
@@ -66,8 +66,8 @@ export const processAndCompressImage = (file: File, originalFileSize?: number): 
         let currentWidth = img.naturalWidth;
         let currentHeight = img.naturalHeight;
         
-        // Ensure max dimension is 2048 but preserve aspect ratio
-        const maxDimension = 2048;
+        // Ensure max dimension is 3072 but preserve aspect ratio (Phase 1 optimization)
+        const maxDimension = 3072;
         if (currentWidth > maxDimension || currentHeight > maxDimension) {
           if (currentWidth > currentHeight) {
             currentHeight = Math.round((currentHeight * maxDimension) / currentWidth);
@@ -106,15 +106,15 @@ export const processAndCompressImage = (file: File, originalFileSize?: number): 
             
             console.log(`Iteration ${iterations + 1}: ${currentWidth}x${currentHeight}, Size: ${(compressedBlob.size / (1024 * 1024)).toFixed(2)}MB`);
             
-            // Check if we're in the target range (4.5MB - 5MB)
-            if (compressedBlob.size >= SIZE_4_5MB && compressedBlob.size <= SIZE_5MB) {
+            // Check if we're in the target range (7MB - 8MB)
+            if (compressedBlob.size >= SIZE_7MB && compressedBlob.size <= SIZE_8MB) {
               console.log(`Target reached: ${(compressedBlob.size / (1024 * 1024)).toFixed(2)}MB`);
               return resolve(compressedBlob);
             }
             
-            // If we've compressed below 4.5MB, use the previous iteration if available
-            if (compressedBlob.size < SIZE_4_5MB) {
-              if (bestBlob && bestBlob.size >= SIZE_4_5MB) {
+            // If we've compressed below 7MB, use the previous iteration if available
+            if (compressedBlob.size < SIZE_7MB) {
+              if (bestBlob && bestBlob.size >= SIZE_7MB) {
                 console.log(`Using previous iteration: ${(bestBlob.size / (1024 * 1024)).toFixed(2)}MB`);
                 return resolve(bestBlob);
               }

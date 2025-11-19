@@ -2,6 +2,7 @@ import fetch from 'node-fetch';
 import FormData from 'form-data';
 import crypto from 'crypto';
 import type { IStorage } from '../storage';
+import { fetchWithTimeout, retryWithBackoff } from '../utils/fetch-utils';
 
 export interface AddDropShadowRequest {
   images?: Array<{
@@ -22,59 +23,6 @@ export interface AddDropShadowRequest {
 
 async function generateSignature(stringToSign: string, apiSecret: string): Promise<string> {
   return crypto.createHash('sha1').update(stringToSign).digest('hex');
-}
-
-/**
- * Fetch with timeout (Phase 1 stabilization)
- * Prevents hanging requests to Cloudinary API
- */
-async function fetchWithTimeout(url: string, options: any, timeout: number = 30000): Promise<any> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
-  
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    return response;
-  } catch (error: any) {
-    clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      throw new Error(`Request timeout after ${timeout}ms`);
-    }
-    throw error;
-  }
-}
-
-/**
- * Retry wrapper with exponential backoff (Phase 1 stabilization)
- * Handles transient Cloudinary API failures
- */
-async function retryWithBackoff<T>(
-  operation: () => Promise<T>,
-  maxRetries: number = 3,
-  baseDelay: number = 2000
-): Promise<T> {
-  let lastError: any;
-  
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      return await operation();
-    } catch (error: any) {
-      lastError = error;
-      
-      if (attempt < maxRetries - 1) {
-        const delay = baseDelay * Math.pow(2, attempt); // Exponential backoff: 2s, 4s, 8s
-        console.warn(`Cloudinary request failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`, error.message);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-  }
-  
-  console.error(`Cloudinary request failed after ${maxRetries} attempts:`, lastError);
-  throw lastError;
 }
 
 export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorage) {
@@ -190,6 +138,7 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
         processedImages.push({
           name: img.name,
           shadowedData: '',
+          shadowedFileId: undefined,
           error: 'File not found in storage',
         });
         continue;
@@ -254,9 +203,31 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
 
       const shadowedDataUrl = `data:image/png;base64,${base64}`;
 
+      // Store shadowedData as file for file ID architecture (Phase 1 optimization)
+      let shadowedFileId: string | undefined;
+      if (storage) {
+        try {
+          const buffer = Buffer.from(transformedBuffer);
+          const shadowedFile = await storage.createFile(
+            {
+              storageKey: `shadows/${Date.now()}-${img.name}`,
+              mimeType: 'image/png',
+              bytes: buffer.length,
+              originalFilename: `shadow-${img.name}`,
+            },
+            buffer
+          );
+          shadowedFileId = shadowedFile.id;
+          console.log(`💾 Stored shadow as file: ${shadowedFileId} (${buffer.length} bytes)`);
+        } catch (storageError) {
+          console.warn(`Failed to store shadow as file for ${img.name}:`, storageError);
+        }
+      }
+
       processedImages.push({
         name: img.name,
         shadowedData: shadowedDataUrl,
+        shadowedFileId,
       });
 
       console.log(`✅ Successfully added shadow to ${img.name}`);
@@ -295,6 +266,7 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
       processedImages.push({
         name: img.name,
         shadowedData: img.data,
+        shadowedFileId: undefined,
         error: imageError instanceof Error ? imageError.message : 'Unknown error',
       });
     }

@@ -136,7 +136,7 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onFilesUploaded }) => {
                           file.name.toLowerCase().endsWith('.cr2') ||
                           file.name.toLowerCase().endsWith('.nef') ||
                           file.name.toLowerCase().endsWith('.arw');
-      const isValidSize = file.size <= 50 * 1024 * 1024; // 50MB limit
+      const isValidSize = file.size <= 40 * 1024 * 1024; // 40MB limit (Phase 1 optimization)
       return isValidType && isValidSize;
     });
 
@@ -230,7 +230,7 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onFilesUploaded }) => {
       'image/*': ['.png', '.jpg', '.jpeg', '.webp', '.heic', '.cr2', '.nef', '.arw']
     },
     maxFiles: 20 - selectedFiles.length,
-    maxSize: 50 * 1024 * 1024 // 50MB
+    maxSize: 40 * 1024 * 1024 // 40MB (Phase 1 optimization)
   });
 
   const removeFile = (index: number) => {

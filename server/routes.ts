@@ -17,7 +17,7 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
   const upload = multer({ 
     storage: multer.memoryStorage(),
     limits: {
-      fileSize: 20 * 1024 * 1024, // 20MB max file size
+      fileSize: 40 * 1024 * 1024, // 40MB max file size (Phase 1 optimization)
       files: 1 // Only allow 1 file per upload
     }
   });
@@ -30,7 +30,7 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
     upload.single("file")(req, res, async (err) => {
       if (err) {
         if (err.code === 'LIMIT_FILE_SIZE') {
-          return res.status(400).json({ error: "File size exceeds 20MB limit" });
+          return res.status(400).json({ error: "File size exceeds 40MB limit" });
         }
         console.error("Multer error:", err);
         return res.status(400).json({ error: "File upload failed" });
