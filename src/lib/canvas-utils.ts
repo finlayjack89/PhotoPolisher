@@ -269,12 +269,12 @@ async function drawReflection(
       width,
       height,
       4,  // blur: 4px for surface diffusion
-      opacity // Master opacity from options
+      opacity // Master opacity baked into the reflection texture
     );
 
     // Draw reflection onto main canvas
     ctx.save();
-    ctx.globalAlpha = opacity;
+    ctx.globalAlpha = 1.0; // FIXED: Use 1.0 to avoid double-fading (opacity already baked into texture)
     ctx.drawImage(reflectionCanvas, x, y, width, height);
     ctx.restore();
 

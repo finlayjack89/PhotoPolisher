@@ -259,6 +259,13 @@ export async function generateSmartReflection(
 
     ctx.globalCompositeOperation = 'source-over';
 
+    // 3. Apply master opacity to entire reflection
+    console.log('🪞 [SmartReflection] Step 3: Applying master opacity', opacity);
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+    ctx.fillRect(0, 0, width, height);
+    ctx.globalCompositeOperation = 'source-over';
+
     console.log('🪞 [SmartReflection] ✅ Generation complete');
     return canvas;
   } catch (error) {
