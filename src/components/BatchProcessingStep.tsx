@@ -534,7 +534,7 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
       spread: state.shadowConfig.spread,
       opacity: state.shadowConfig.opacity || 75
     };
-    const reflectionOptions = masterRules.reflectionOptions || { opacity: 0.65, falloff: 0.8 };
+    const reflectionOptions = masterRules.reflectionOptions || { opacity: 0.25, falloff: 0.8 };
 
     // Store the options back in masterRules
     masterRules.shadowOptions = shadowOptions;

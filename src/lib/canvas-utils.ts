@@ -1,5 +1,6 @@
 // src/lib/canvas-utils.ts
 import { loadImage } from './file-utils';
+import { generateSmartReflection } from './reflection-utils';
 
 /**
  * Clean up a canvas to hint garbage collection to free memory faster.
@@ -245,64 +246,44 @@ export async function getImageDimensions(
 
 /**
  * Draws a reflection of the clean subject image onto the main canvas.
- * The reflection is vertically flipped and has a gradient fade from opaque to transparent.
+ * Uses the new studio-grade reflection with proper overlap to eliminate gaps.
  * 
  * @param ctx - Main canvas context to draw the reflection onto
  * @param cleanSubjectImg - The clean subject image (HTMLImageElement)
  * @param reflectionRect - Where to draw the reflection (x, y, width, height)
  * @param reflectionOptions - Opacity and falloff parameters
  */
-function drawReflection(
+async function drawReflection(
   ctx: CanvasRenderingContext2D,
   cleanSubjectImg: HTMLImageElement,
   reflectionRect: LayoutRect,
   reflectionOptions: ReflectionOptions
-): void {
+): Promise<void> {
   const { x, y, width, height } = reflectionRect;
-  const { opacity, falloff } = reflectionOptions;
+  const { opacity } = reflectionOptions;
 
-  // Create temporary canvas for reflection rendering
-  const tempCanvas = document.createElement('canvas');
-  tempCanvas.width = width;
-  tempCanvas.height = height;
-  const tempCtx = tempCanvas.getContext('2d');
+  try {
+    // Generate studio-grade reflection with blur and gradient
+    const reflectionCanvas = await generateSmartReflection(
+      cleanSubjectImg,
+      width,
+      height,
+      4,  // blur: 4px for surface diffusion
+      opacity // Master opacity from options
+    );
 
-  if (!tempCtx) {
-    console.error('Failed to create temp canvas context for reflection');
-    return;
+    // Draw reflection onto main canvas
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.drawImage(reflectionCanvas, x, y, width, height);
+    ctx.restore();
+
+    // Clean up reflection canvas
+    reflectionCanvas.width = 0;
+    reflectionCanvas.height = 0;
+  } catch (error) {
+    console.error('Failed to generate smart reflection:', error);
   }
-
-  // 1. Draw the clean subject flipped vertically
-  tempCtx.save();
-  tempCtx.translate(0, height);
-  tempCtx.scale(1, -1);
-  tempCtx.drawImage(cleanSubjectImg, 0, 0, width, height);
-  tempCtx.restore();
-
-  // 2. Apply gradient fade using destination-out composition
-  // This creates a fade from full intensity (top) to transparent (bottom)
-  const gradient = tempCtx.createLinearGradient(0, 0, 0, height * falloff);
-  gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');  // Top: keep full intensity (0 alpha removed)
-  gradient.addColorStop(1, 'rgba(0, 0, 0, 1)');   // Bottom: fully transparent (1 alpha removed)
-
-  tempCtx.globalCompositeOperation = 'destination-out';
-  tempCtx.fillStyle = gradient;
-  tempCtx.fillRect(0, 0, width, height);
-
-  // 3. Composite the reflection onto the main canvas with opacity applied
-  ctx.globalAlpha = opacity;
-  ctx.drawImage(tempCanvas, x, y);
-  ctx.globalAlpha = 1.0;
-
-  // 4. Clean up temporary canvas to free memory
-  cleanupCanvas(tempCanvas);
-
-  console.log('🪞 [Reflection] Drawn at:', {
-    position: { x, y },
-    dimensions: { width, height },
-    opacity,
-    falloff
-  });
 }
 
 /**
@@ -374,7 +355,7 @@ export async function compositeLayers(
         (subjectLayer.height / 1.5) / cleanH
       );
 
-      drawReflection(
+      await drawReflection(
         ctx,
         cleanSubjectImg,
         {
@@ -484,7 +465,17 @@ export async function compositeLayersV2(
 
     // 6. Draw reflection (if enabled) - BEFORE drawing the clean product
     if (reflectionOptions && reflectionOptions.opacity > 0) {
-      drawReflection(ctx, cleanSubjectImg, layout.reflectionRect, reflectionOptions);
+      // GAP FIX: Overlap by 2 pixels so subject covers the seam
+      const GAP_OVERLAP = 2;
+      const productRect = layout.productRect;
+      const adjustedReflectionRect = {
+        x: productRect.x,
+        y: productRect.y + productRect.height - GAP_OVERLAP, // Overlap by 2px
+        width: productRect.width,
+        height: Math.round(productRect.height * 0.6) // Only need 60% height
+      };
+      
+      await drawReflection(ctx, cleanSubjectImg, adjustedReflectionRect, reflectionOptions);
     }
 
     // 7. Draw clean product on top

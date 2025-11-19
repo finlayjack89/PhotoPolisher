@@ -32,11 +32,11 @@ export interface ReflectionOptions {
 }
 
 const DEFAULT_OPTIONS: ReflectionOptions = {
-  intensity: 0.65, // ⬆️ Increased from 0.4 to 0.65 (more visible reflection)
-  height: 0.6, // Keep at 0.6
-  blur: 4, // Keep at 4
-  fadeStrength: 0.8, // Keep at 0.8
-  offset: 0, // Keep at 0
+  intensity: 0.25, // Studio-grade subtle reflection for professional look
+  height: 0.6, // Reflect top 60% of product
+  blur: 4, // Surface diffusion for photorealism
+  fadeStrength: 0.8, // Gradient fade strength
+  offset: 0, // No gap (overlap handled in compositor)
 };
 
 /**
@@ -192,6 +192,54 @@ export const generateReflection = async (
     img.src = subjectDataUrl;
   });
 };
+
+/**
+ * Studio-Grade Reflection Generator
+ * Simplified reflection with professional blur and gradient falloff
+ * 
+ * @param img - Source image (HTMLImageElement)
+ * @param width - Output width
+ * @param height - Output height (typically 0.6 * subject height)
+ * @param blur - Surface diffusion blur in pixels (default: 4)
+ * @param opacity - Master opacity (default: 0.25)
+ * @returns Canvas with reflection ready to composite
+ */
+export async function generateSmartReflection(
+  img: HTMLImageElement,
+  width: number,
+  height: number,
+  blur: number = 4,
+  opacity: number = 0.25
+): Promise<HTMLCanvasElement> {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) throw new Error('Could not get context for smart reflection');
+
+  // 1. Vertical Flip & Surface Diffusion
+  ctx.save();
+  ctx.translate(0, height);
+  ctx.scale(1, -1);
+  ctx.filter = `blur(${blur}px)`; // Simulates glossy floor diffusion
+  ctx.drawImage(img, 0, 0, width, height);
+  ctx.restore();
+
+  // 2. Gradient Mask (Distance Falloff) - Fresnel effect
+  ctx.globalCompositeOperation = 'destination-in';
+  const gradient = ctx.createLinearGradient(0, 0, 0, height);
+  gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');     // Full visibility at touch point
+  gradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.6)'); // Mid-fade
+  gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');     // Invisible at bottom
+  
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.globalCompositeOperation = 'source-over';
+
+  return canvas;
+}
 
 /**
  * Generate reflections for multiple images in parallel
