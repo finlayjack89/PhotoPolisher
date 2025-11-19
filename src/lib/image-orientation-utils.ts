@@ -176,173 +176,49 @@ interface Point {
 }
 
 /**
- * Apply morphological closing operation (dilation followed by erosion)
- * Smooths bumps and fills small gaps
+ * Detect object bounds by scanning alpha channel
  */
-const morphologicalClosing = (imageData: ImageData, radius: number): ImageData => {
+const detectObjectBounds = (imageData: ImageData): { minY: number; maxY: number; minX: number; maxX: number } | null => {
   const { width, height, data } = imageData;
-  const result = new ImageData(width, height);
-  
-  const dilated = new Uint8ClampedArray(data.length);
-  const eroded = new Uint8ClampedArray(data.length);
+  let minY = height, maxY = 0, minX = width, maxX = 0;
+  let hasContent = false;
   
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const idx = (y * width + x) * 4;
-      let maxAlpha = 0;
-      
-      for (let dy = -radius; dy <= radius; dy++) {
-        for (let dx = -radius; dx <= radius; dx++) {
-          if (dx * dx + dy * dy <= radius * radius) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-              const nidx = (ny * width + nx) * 4;
-              maxAlpha = Math.max(maxAlpha, data[nidx + 3]);
-            }
-          }
-        }
+      if (data[idx + 3] > 200) {
+        hasContent = true;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
       }
-      
-      dilated[idx] = data[idx];
-      dilated[idx + 1] = data[idx + 1];
-      dilated[idx + 2] = data[idx + 2];
-      dilated[idx + 3] = maxAlpha;
     }
   }
   
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) * 4;
-      let minAlpha = 255;
-      
-      for (let dy = -radius; dy <= radius; dy++) {
-        for (let dx = -radius; dx <= radius; dx++) {
-          if (dx * dx + dy * dy <= radius * radius) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-              const nidx = (ny * width + nx) * 4;
-              minAlpha = Math.min(minAlpha, dilated[nidx + 3]);
-            }
-          }
-        }
-      }
-      
-      eroded[idx] = dilated[idx];
-      eroded[idx + 1] = dilated[idx + 1];
-      eroded[idx + 2] = dilated[idx + 2];
-      eroded[idx + 3] = minAlpha;
-    }
-  }
-  
-  for (let i = 0; i < result.data.length; i++) {
-    result.data[i] = eroded[i];
-  }
-  
-  return result;
+  return hasContent ? { minY, maxY, minX, maxX } : null;
 };
 
 /**
- * Find connected components and return only the largest one (main product)
- * Filters out accessories, straps, tags
+ * Find bottom contour points using column scanning
  */
-const getMainComponent = (imageData: ImageData, minAreaThreshold: number = 0.08): ImageData => {
+const findBottomContour = (imageData: ImageData, bounds: { minY: number; maxY: number; minX: number; maxX: number }): Point[] => {
   const { width, height, data } = imageData;
-  const visited = new Uint8Array(width * height);
-  const components: number[][] = [];
-  
-  const floodFill = (startX: number, startY: number): number[] => {
-    const pixels: number[] = [];
-    const stack: Point[] = [{ x: startX, y: startY }];
-    
-    while (stack.length > 0) {
-      const { x, y } = stack.pop()!;
-      const idx = y * width + x;
-      
-      if (x < 0 || x >= width || y < 0 || y >= height || visited[idx]) continue;
-      
-      const pixelIdx = idx * 4;
-      if (data[pixelIdx + 3] < 20) continue;
-      
-      visited[idx] = 1;
-      pixels.push(idx);
-      
-      stack.push({ x: x + 1, y });
-      stack.push({ x: x - 1, y });
-      stack.push({ x, y: y + 1 });
-      stack.push({ x, y: y - 1 });
-    }
-    
-    return pixels;
-  };
-  
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = y * width + x;
-      if (!visited[idx] && data[idx * 4 + 3] >= 20) {
-        const component = floodFill(x, y);
-        if (component.length > 0) {
-          components.push(component);
-        }
-      }
-    }
-  }
-  
-  if (components.length === 0) return imageData;
-  
-  components.sort((a, b) => b.length - a.length);
-  const mainComponent = components[0];
-  const totalPixels = width * height;
-  const areaThreshold = totalPixels * minAreaThreshold;
-  
-  const result = new ImageData(width, height);
-  const mainComponentSet = new Set(mainComponent);
-  
-  for (let i = 0; i < data.length; i += 4) {
-    const pixelIdx = i / 4;
-    if (mainComponentSet.has(pixelIdx)) {
-      result.data[i] = data[i];
-      result.data[i + 1] = data[i + 1];
-      result.data[i + 2] = data[i + 2];
-      result.data[i + 3] = data[i + 3];
-    } else {
-      result.data[i + 3] = 0;
-    }
-  }
-  
-  return result;
-};
-
-/**
- * Sample points from the bottom band of the image with center weighting
- */
-const sampleBottomBand = (
-  imageData: ImageData,
-  bandHeightPercent: number = 0.08
-): Point[] => {
-  const { width, height, data } = imageData;
-  const bandHeight = Math.max(3, Math.floor(height * bandHeightPercent));
-  const startY = height - bandHeight;
-  
   const points: Point[] = [];
   
-  for (let x = 0; x < width; x++) {
-    let lowestY = -1;
+  for (let x = bounds.minX; x <= bounds.maxX; x++) {
+    let bottomY = -1;
     
-    for (let y = startY; y < height; y++) {
+    for (let y = bounds.maxY; y >= bounds.minY; y--) {
       const idx = (y * width + x) * 4;
-      if (data[idx + 3] >= 20) {
-        lowestY = y;
+      if (data[idx + 3] > 200) {
+        bottomY = y;
+        break;
       }
     }
     
-    if (lowestY >= 0) {
-      const centerWeight = 1 + Math.cos((x / width - 0.5) * Math.PI);
-      const weight = Math.round(centerWeight);
-      for (let i = 0; i < weight; i++) {
-        points.push({ x, y: lowestY });
-      }
+    if (bottomY >= 0) {
+      points.push({ x, y: bottomY });
     }
   }
   
@@ -350,70 +226,75 @@ const sampleBottomBand = (
 };
 
 /**
- * Fit a line using RANSAC (robust to outliers)
+ * Smart RANSAC with center weighting to avoid rounded corners
  */
-const fitLineRANSAC = (
-  points: Point[],
-  iterations: number = 200,
-  threshold: number = 2.5
-): { slope: number; intercept: number; inliers: Point[]; confidence: number } | null => {
-  if (points.length < 10) return null;
+const fitBaselineRANSAC = (points: Point[]): { angle: number; consensus: number } | null => {
+  if (points.length < 20) {
+    console.log('[DESKEW] Too few points:', points.length);
+    return null;
+  }
+  
+  points.sort((a, b) => a.x - b.x);
+  const trimCount = Math.floor(points.length * 0.15);
+  const centerPoints = points.slice(trimCount, points.length - trimCount);
+  
+  console.log(`[DESKEW] Points: total=${points.length}, after corner filtering=${centerPoints.length}`);
+  
+  if (centerPoints.length < 10) {
+    console.log('[DESKEW] Too few center points after filtering');
+    return null;
+  }
   
   let bestSlope = 0;
   let bestIntercept = 0;
-  let bestInliers: Point[] = [];
+  let bestInliers = 0;
   
-  for (let iter = 0; iter < iterations; iter++) {
-    const idx1 = Math.floor(Math.random() * points.length);
-    let idx2 = Math.floor(Math.random() * points.length);
+  const ITERATIONS = 200;
+  const INLIER_THRESHOLD = 5;
+  
+  for (let iter = 0; iter < ITERATIONS; iter++) {
+    const idx1 = Math.floor(Math.random() * centerPoints.length);
+    let idx2 = Math.floor(Math.random() * centerPoints.length);
     while (idx2 === idx1) {
-      idx2 = Math.floor(Math.random() * points.length);
+      idx2 = Math.floor(Math.random() * centerPoints.length);
     }
     
-    const p1 = points[idx1];
-    const p2 = points[idx2];
+    const p1 = centerPoints[idx1];
+    const p2 = centerPoints[idx2];
     
     if (Math.abs(p2.x - p1.x) < 1) continue;
     
     const slope = (p2.y - p1.y) / (p2.x - p1.x);
     const intercept = p1.y - slope * p1.x;
     
-    const inliers: Point[] = [];
-    for (const point of points) {
+    let inlierCount = 0;
+    for (const point of centerPoints) {
       const expectedY = slope * point.x + intercept;
       const residual = Math.abs(point.y - expectedY);
-      if (residual <= threshold) {
-        inliers.push(point);
+      if (residual <= INLIER_THRESHOLD) {
+        inlierCount++;
       }
     }
     
-    if (inliers.length > bestInliers.length) {
+    if (inlierCount > bestInliers) {
       bestSlope = slope;
       bestIntercept = intercept;
-      bestInliers = inliers;
+      bestInliers = inlierCount;
     }
   }
   
-  if (bestInliers.length === 0) return null;
+  const consensus = bestInliers / centerPoints.length;
+  console.log(`[DESKEW] RANSAC: inliers=${bestInliers}/${centerPoints.length} (${(consensus * 100).toFixed(1)}%)`);
   
-  const inlierRatio = bestInliers.length / points.length;
-  
-  let sumResiduals = 0;
-  for (const point of bestInliers) {
-    const expectedY = bestSlope * point.x + bestIntercept;
-    sumResiduals += Math.abs(point.y - expectedY);
+  if (consensus < 0.25) {
+    console.log('[DESKEW] Insufficient consensus, likely circular or irregular object');
+    return null;
   }
-  const avgResidual = sumResiduals / bestInliers.length;
   
-  const residualScore = Math.max(0, 1 - avgResidual / threshold);
-  const confidence = (inlierRatio * 0.6 + residualScore * 0.4) * 100;
+  const angleRadians = Math.atan(bestSlope);
+  const angleDegrees = -(angleRadians * 180) / Math.PI;
   
-  return {
-    slope: bestSlope,
-    intercept: bestIntercept,
-    inliers: bestInliers,
-    confidence
-  };
+  return { angle: angleDegrees, consensus };
 };
 
 /**
@@ -428,9 +309,16 @@ export const autoDeskewSubject = async (
     
     img.onload = async () => {
       try {
+        const analysisMaxWidth = 600;
+        const scale = Math.min(1, analysisMaxWidth / img.width);
+        const analysisWidth = Math.floor(img.width * scale);
+        const analysisHeight = Math.floor(img.height * scale);
+        
+        console.log(`[DESKEW] Original: ${img.width}x${img.height}, Analysis: ${analysisWidth}x${analysisHeight}`);
+        
         const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
+        canvas.width = analysisWidth;
+        canvas.height = analysisHeight;
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         
         if (!ctx) {
@@ -438,71 +326,77 @@ export const autoDeskewSubject = async (
           return;
         }
         
-        ctx.drawImage(img, 0, 0);
-        let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, analysisWidth, analysisHeight);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         
-        imageData = morphologicalClosing(imageData, 3);
-        imageData = getMainComponent(imageData, 0.08);
-        
-        const points = sampleBottomBand(imageData, 0.08);
-        
-        if (points.length < 10) {
+        const bounds = detectObjectBounds(imageData);
+        if (!bounds) {
           resolve({ 
             rotatedDataUrl: null, 
             cleanRotatedDataUrl: null, 
             angle: 0, 
             confidence: 0, 
-            reason: 'Insufficient baseline points detected' 
+            reason: 'No object detected in image' 
           });
           return;
         }
         
-        const lineResult = fitLineRANSAC(points, 200, 2.5);
+        console.log(`[DESKEW] Object bounds: y=${bounds.minY}-${bounds.maxY}, x=${bounds.minX}-${bounds.maxX}`);
         
-        if (!lineResult) {
+        const bottomPoints = findBottomContour(imageData, bounds);
+        console.log(`[DESKEW] Bottom contour points: ${bottomPoints.length}`);
+        
+        if (bottomPoints.length < 20) {
           resolve({ 
             rotatedDataUrl: null, 
             cleanRotatedDataUrl: null, 
             angle: 0, 
             confidence: 0, 
-            reason: 'Could not fit baseline' 
+            reason: `Insufficient bottom edge detected (${bottomPoints.length} points)` 
           });
           return;
         }
         
-        const { slope, inliers, confidence: rawConfidence } = lineResult;
+        const baseline = fitBaselineRANSAC(bottomPoints);
         
-        const angleRadians = Math.atan(slope);
-        const angleDegrees = -(angleRadians * 180) / Math.PI;
-        
-        const xMin = Math.min(...inliers.map(p => p.x));
-        const xMax = Math.max(...inliers.map(p => p.x));
-        const baselineWidth = xMax - xMin;
-        const widthRatio = baselineWidth / img.width;
-        
-        let confidence = rawConfidence;
-        if (widthRatio < 0.4) confidence *= 0.5;
-        if (Math.abs(angleDegrees) > 8) confidence *= 0.6;
-        
-        const confidenceThreshold = 75;
-        const angleThreshold = 10;
-        
-        if (confidence < confidenceThreshold || Math.abs(angleDegrees) > angleThreshold) {
-          let reason = 'Auto-straighten skipped: ';
-          if (confidence < confidenceThreshold) reason += 'low confidence (curved/round base detected)';
-          else reason += 'extreme angle detected';
-          
+        if (!baseline) {
           resolve({ 
             rotatedDataUrl: null, 
             cleanRotatedDataUrl: null, 
-            angle: angleDegrees, 
-            confidence, 
-            reason 
+            angle: 0, 
+            confidence: 0, 
+            reason: 'Could not fit baseline (likely circular or irregular base)' 
           });
           return;
         }
         
-        const rotateImageByAngle = (imageUrl: string, degrees: number): Promise<string> => {
+        const { angle: calculatedAngle, consensus } = baseline;
+        console.log(`[DESKEW] Calculated angle: ${calculatedAngle.toFixed(2)}°, consensus: ${(consensus * 100).toFixed(1)}%`);
+        
+        const MAX_ROTATION = 15;
+        if (Math.abs(calculatedAngle) > MAX_ROTATION) {
+          resolve({ 
+            rotatedDataUrl: null, 
+            cleanRotatedDataUrl: null, 
+            angle: calculatedAngle, 
+            confidence: consensus * 100, 
+            reason: `Angle too extreme (${calculatedAngle.toFixed(1)}° > ${MAX_ROTATION}°), skipping rotation` 
+          });
+          return;
+        }
+        
+        if (Math.abs(calculatedAngle) < 0.5) {
+          resolve({ 
+            rotatedDataUrl: null, 
+            cleanRotatedDataUrl: null, 
+            angle: calculatedAngle, 
+            confidence: consensus * 100, 
+            reason: 'Image already straight (angle < 0.5°)' 
+          });
+          return;
+        }
+        
+        const rotateImage = (imageUrl: string, degrees: number): Promise<string> => {
           return new Promise((rotResolve, rotReject) => {
             const rotImg = new Image();
             rotImg.onload = () => {
@@ -532,7 +426,6 @@ export const autoDeskewSubject = async (
               
               const result = rotCanvas.toDataURL('image/png');
               
-              // Clean up rotation canvas to free memory
               rotCanvas.width = 0;
               rotCanvas.height = 0;
               
@@ -543,25 +436,26 @@ export const autoDeskewSubject = async (
           });
         };
         
-        const rotatedDataUrl = await rotateImageByAngle(imageDataUrl, angleDegrees);
+        const rotatedDataUrl = await rotateImage(imageDataUrl, calculatedAngle);
         const cleanRotatedDataUrl = cleanImageDataUrl 
-          ? await rotateImageByAngle(cleanImageDataUrl, angleDegrees)
+          ? await rotateImage(cleanImageDataUrl, calculatedAngle)
           : null;
         
-        // Clean up main analysis canvas to free memory
         canvas.width = 0;
         canvas.height = 0;
+        
+        console.log(`[DESKEW] ✓ Straightened by ${calculatedAngle.toFixed(1)}° (${(consensus * 100).toFixed(1)}% consensus)`);
         
         resolve({
           rotatedDataUrl,
           cleanRotatedDataUrl,
-          angle: angleDegrees,
-          confidence,
-          reason: `Straightened by ${angleDegrees.toFixed(1)}°`
+          angle: calculatedAngle,
+          confidence: consensus * 100,
+          reason: `Straightened by ${calculatedAngle.toFixed(1)}°`
         });
         
       } catch (error) {
-        console.error('Error in autoDeskewSubject:', error);
+        console.error('[DESKEW] Error:', error);
         resolve({ 
           rotatedDataUrl: null, 
           cleanRotatedDataUrl: null, 
