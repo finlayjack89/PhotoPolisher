@@ -258,7 +258,11 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
       
       setProgress(5);
       
-      // Split into batches of 6-8 images to avoid 413 payload errors
+      // Frontend Batch Size Validation (Pre-compression estimate)
+      // NOTE: This is a user-friendly early warning to prevent large payloads.
+      // The backend performs authoritative validation (300MB limit) after compression.
+      // Frontend batching helps avoid 413 Payload Too Large errors by splitting large batches.
+      // Batch size of 7 is an estimate based on typical compressed image sizes (~10-15MB each).
       const BATCH_SIZE = 7;
       const batches: Array<typeof imagesToProcess> = [];
       for (let i = 0; i < imagesToProcess.length; i += BATCH_SIZE) {

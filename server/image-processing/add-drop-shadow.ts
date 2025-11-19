@@ -124,6 +124,26 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
     throw new Error('No images or fileIds provided');
   }
 
+  const MAX_BATCH_SIZE = 300 * 1024 * 1024;
+  let totalBatchSize = 0;
+  
+  for (const img of imagesToProcess) {
+    if (img.data) {
+      // Normalize base64 string: strip data URL prefix and whitespace before calculating
+      const base64Data = img.data.replace(/^data:image\/[a-z]+;base64,/, '').replace(/\s/g, '');
+      // Base64 is ~33% larger than actual binary, so multiply by 0.75 to get actual size
+      const estimatedSize = base64Data.length * 0.75;
+      totalBatchSize += estimatedSize;
+    }
+  }
+  
+  const totalSizeMB = (totalBatchSize / (1024 * 1024)).toFixed(2);
+  console.log(`Processing shadow batch: ${imagesToProcess.length} images, ${totalSizeMB} MB total`);
+  
+  if (totalBatchSize > MAX_BATCH_SIZE) {
+    throw new Error(`Total batch size: ${totalSizeMB} MB exceeds 300MB limit. Please process images in smaller batches.`);
+  }
+
   console.log(`Processing ${imagesToProcess.length} images for drop shadow with params: azimuth=${azimuth}, elevation=${elevation}, spread=${spread}, opacity=${opacity}`);
 
   const processedImages = [];

@@ -195,6 +195,27 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
 
       const { fileIds } = requestSchema.parse(req.body);
 
+      // Validate batch size before creating job (300MB limit)
+      const MAX_BATCH_SIZE = 300 * 1024 * 1024;
+      let totalSize = 0;
+      
+      for (const fileId of fileIds) {
+        const fileData = await storage.getFile(fileId);
+        if (!fileData) {
+          return res.status(400).json({ 
+            error: `File ${fileId} not found in storage. Cannot calculate batch size.`
+          });
+        }
+        totalSize += fileData.file.bytes;
+      }
+      
+      if (totalSize > MAX_BATCH_SIZE) {
+        const sizeMB = (totalSize / (1024 * 1024)).toFixed(2);
+        return res.status(400).json({ 
+          error: `Total batch size: ${sizeMB} MB exceeds 300MB limit. Please process images in smaller batches.`
+        });
+      }
+
       const [job] = await db
         .insert(backgroundJobs)
         .values({
@@ -604,12 +625,86 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
 
   app.post("/api/add-drop-shadow", async (req: Request, res: Response) => {
     try {
+      const MAX_BATCH_SIZE = 300 * 1024 * 1024;
+      
+      // Validate fileIds batch size if present
+      if (req.body.fileIds && Array.isArray(req.body.fileIds)) {
+        // Define Zod schema for rigorous fileId validation
+        const fileIdSchema = z.union([
+          z.string(), 
+          z.object({ fileId: z.string(), name: z.string().optional() })
+        ]);
+        
+        // Validate each fileIds entry against schema before processing
+        for (const item of req.body.fileIds) {
+          const validation = fileIdSchema.safeParse(item);
+          if (!validation.success) {
+            return res.status(400).json({ 
+              error: "Invalid fileIds format: each entry must be a string or {fileId, name} object"
+            });
+          }
+        }
+        
+        let totalSize = 0;
+        
+        // Calculate total batch size with strict validation
+        for (const item of req.body.fileIds) {
+          const fileId = typeof item === 'string' ? item : item.fileId;
+          
+          const fileData = await storage.getFile(fileId);
+          if (!fileData) {
+            return res.status(400).json({ 
+              error: `File ${fileId} not found in storage. Cannot calculate batch size.`
+            });
+          }
+          
+          totalSize += fileData.file.bytes;
+        }
+        
+        if (totalSize > MAX_BATCH_SIZE) {
+          const sizeMB = (totalSize / (1024 * 1024)).toFixed(2);
+          return res.status(400).json({ 
+            error: "Total batch size exceeds 300MB limit",
+            details: `Current batch size: ${sizeMB}MB. Please process images in smaller batches.`
+          });
+        }
+      }
+      
+      // Validate legacy images base64 payload if present
+      if (req.body.images && Array.isArray(req.body.images)) {
+        let totalBase64Size = 0;
+        
+        for (const img of req.body.images) {
+          if (img.data) {
+            // Normalize base64 string: strip data URL prefix and whitespace before calculating
+            const base64Data = img.data.replace(/^data:image\/[a-z]+;base64,/, '').replace(/\s/g, '');
+            // Base64 is ~33% larger than actual binary, so multiply by 0.75 to get actual size
+            const estimatedSize = base64Data.length * 0.75;
+            totalBase64Size += estimatedSize;
+          }
+        }
+        
+        if (totalBase64Size > MAX_BATCH_SIZE) {
+          const sizeMB = (totalBase64Size / (1024 * 1024)).toFixed(2);
+          return res.status(400).json({ 
+            error: `Total batch size: ${sizeMB} MB exceeds 300MB limit. Please process images in smaller batches.`
+          });
+        }
+      }
+      
       const { addDropShadow } = await import("./image-processing/add-drop-shadow");
       const result = await addDropShadow(req.body, storage);
       res.json(result);
     } catch (error) {
       console.error("Error in add-drop-shadow:", error);
-      res.status(500).json({ error: error instanceof Error ? error.message : "Drop shadow failed" });
+      const errorMessage = error instanceof Error ? error.message : "Drop shadow failed";
+      
+      // Return 400 for validation errors (batch size limit), 500 for other errors
+      if (errorMessage.includes("exceeds 300MB limit") || errorMessage.includes("batch size")) {
+        return res.status(400).json({ error: errorMessage });
+      }
+      
+      res.status(500).json({ error: errorMessage });
     }
   });
 

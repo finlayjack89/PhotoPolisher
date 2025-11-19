@@ -65,3 +65,13 @@ export const loadImage = (url: string): Promise<HTMLImageElement> => {
     img.src = url;
   });
 };
+
+/**
+ * Calculate total file size of an array of files
+ * 
+ * @param files - Array of File objects
+ * @returns Total size in bytes
+ */
+export const calculateTotalFileSize = (files: File[]): number => {
+  return files.reduce((total, file) => total + file.size, 0);
+};

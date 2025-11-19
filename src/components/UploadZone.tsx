@@ -7,9 +7,33 @@ import { X, Upload, FileImage, Scissors } from 'lucide-react';
 import { processAndCompressImage } from "@/lib/image-resize-utils";
 import { detectImageTransparency } from "@/lib/transparency-utils";
 import { correctImageOrientation } from '@/lib/image-orientation-utils';
+import { calculateTotalFileSize } from "@/lib/file-utils";
+import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api-client";
 // @ts-ignore - HEIC library types not available
 import heic2any from 'heic2any';
+
+const MAX_TOTAL_BATCH_SIZE = 300 * 1024 * 1024;
+
+/**
+ * Frontend Batch Size Validation Limitation:
+ * 
+ * This frontend validation provides a pre-compression estimate of batch size.
+ * However, it may not always accurately predict the final size because:
+ * 
+ * 1. RAW files (HEIC, CR2, NEF, ARW) may GROW after conversion to PNG
+ *    - RAW formats use efficient compression
+ *    - Conversion to PNG can result in larger file sizes
+ * 
+ * 2. Post-processing effects (orientation correction, format conversion)
+ *    can change file sizes unpredictably
+ * 
+ * 3. The frontend validation happens before all transformations are applied
+ * 
+ * The backend validation is AUTHORITATIVE and will catch any overages with
+ * a 400 error response including the actual computed batch size. This ensures
+ * memory safety while allowing users to upload files up to the limit.
+ */
 
 interface UploadZoneProps {
   onFilesUploaded: (files: File[]) => void;
@@ -23,6 +47,7 @@ interface FileWithOriginalSize extends File {
 export const UploadZone: React.FC<UploadZoneProps> = ({ onFilesUploaded }) => {
   const [selectedFiles, setSelectedFiles] = useState<FileWithOriginalSize[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
+  const { toast } = useToast();
 
   // Convert HEIC to PNG
   const convertHeicToPng = async (file: File): Promise<File> => {
@@ -141,6 +166,19 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onFilesUploaded }) => {
     });
 
     if (validFiles.length + selectedFiles.length > 20) {
+      return;
+    }
+
+    const currentTotalSize = calculateTotalFileSize(selectedFiles);
+    const newFilesTotalSize = calculateTotalFileSize(validFiles);
+    const combinedTotalSize = currentTotalSize + newFilesTotalSize;
+
+    if (combinedTotalSize > MAX_TOTAL_BATCH_SIZE) {
+      toast({
+        title: "Batch size limit exceeded",
+        description: "Total batch size cannot exceed 300MB. Please reduce the number of files.",
+        variant: "destructive",
+      });
       return;
     }
 
