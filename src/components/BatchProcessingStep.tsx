@@ -8,7 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, ArrowLeft, CheckCircle, AlertCircle, Wand2, RefreshCw } from "lucide-react";
+import { Loader2, ArrowLeft, CheckCircle, AlertCircle, Wand2, RefreshCw, Upload, Minimize2, Moon, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api-client";
 import { 
@@ -22,6 +22,7 @@ import {
 import { useWorkflow } from "@/contexts/WorkflowContext";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { createSizeBoundedBatches } from "@/lib/batch-utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 // Define the subject type
 interface Subject {
@@ -80,6 +81,14 @@ interface Job {
   status: JobStatus;
   final_image_url?: string; // This will be the shadowed_subject_url
   error_message?: string;
+}
+
+// Per-image progress tracking
+export interface ImageProgress {
+  fileName: string;
+  status: 'pending' | 'uploading' | 'compressing' | 'shadowing' | 'compositing' | 'complete' | 'error';
+  currentStep?: string;
+  error?: string;
 }
 
 // Helper to read File as Data URL
@@ -145,13 +154,34 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
   const [showStaleWarning, setShowStaleWarning] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [processedSubjects, setProcessedSubjects] = useState<Subject[]>(subjects as Subject[]);
+  const [imageProgress, setImageProgress] = useState<Map<string, ImageProgress>>(new Map());
   const { toast } = useToast();
   const { state, isShadowStale, markShadowsGenerated } = useWorkflow();
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const isCancelled = useRef(false);
 
+  // Helper function to update individual image progress
+  const updateImageProgress = (fileName: string, status: ImageProgress['status'], currentStep?: string, error?: string) => {
+    setImageProgress(prev => {
+      const newMap = new Map(prev);
+      newMap.set(fileName, { fileName, status, currentStep, error });
+      return newMap;
+    });
+  };
+
   // Check for stale shadows on mount
   useEffect(() => {
+    // Initialize progress for all images
+    const initialProgress = new Map<string, ImageProgress>();
+    processedSubjects.forEach(subject => {
+      initialProgress.set(subject.name, {
+        fileName: subject.name,
+        status: 'pending',
+        currentStep: 'Waiting to start...'
+      });
+    });
+    setImageProgress(initialProgress);
+
     const shadowsAreStale = isShadowStale();
     if (shadowsAreStale) {
       setShowStaleWarning(true);
@@ -291,6 +321,19 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
             const batchNumber = batchGroupIndex + groupOffset + 1;
             const batchImages = batch.length;
             
+            // Update progress for all images in this batch - start with uploading
+            batch.forEach(img => {
+              updateImageProgress(img.name, 'uploading', 'Uploading image...');
+            });
+            
+            // Brief delay to show uploading status
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Then update to compressing
+            batch.forEach(img => {
+              updateImageProgress(img.name, 'compressing', 'Preparing for shadow generation...');
+            });
+            
             setCurrentStep(`Processing batch ${batchNumber} of ${batches.length} (${batchImages} images)...`);
             
             try {
@@ -315,6 +358,11 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
                 console.log(`   FileIds: ${fileIdsInBatch.slice(0, 3).join(', ')}${fileIdsInBatch.length > 3 ? '...' : ''}`);
               }
               
+              // Update progress: shadowing
+              batch.forEach(img => {
+                updateImageProgress(img.name, 'shadowing', 'Adding drop shadow...');
+              });
+
               // Call API with fileIds and fallback base64 data
               const shadowResult = await api.addDropShadow({
                 fileIds: fileIdsInBatch.length > 0 ? batch.filter(img => img.fileId).map(img => ({ fileId: img.fileId!, name: img.name })) : undefined,
@@ -327,8 +375,20 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
               
               if (!shadowResult || !shadowResult.images) {
                 console.warn(`⚠️ Batch ${batchNumber} returned no data, skipping`);
+                batch.forEach(img => {
+                  updateImageProgress(img.name, 'error', 'Shadow generation failed');
+                });
                 return [];
               }
+              
+              // Update progress: mark successful images as complete
+              shadowResult.images.forEach((img: any) => {
+                if (((img.shadowedData && img.shadowedData.length > 0) || img.shadowedFileId) && !img.error) {
+                  updateImageProgress(img.name, 'complete', 'Shadow generated');
+                } else {
+                  updateImageProgress(img.name, 'error', img.error || 'Shadow generation failed');
+                }
+              });
               
               console.log(`✅ Batch ${batchNumber} completed: ${shadowResult.images.length} images processed`);
               return shadowResult.images;
@@ -510,12 +570,22 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
 
         // --- Step 2: Check if we have cached shadowed data (shadowedData or shadowedFileId) ---
         if (subject.shadowedData || subject.shadowedFileId) {
-          // Use cached shadowed data - create a pseudo-job that's already "completed"
+          // Use cached shadowed data - show proper progression
           const shadowUrl = subject.shadowedFileId 
             ? `/api/files/${subject.shadowedFileId}`  // File ID architecture - convert to URL
             : subject.shadowedData;  // Legacy base64 data
           
           console.log(`✅ Using cached shadow for ${name} (${subject.shadowedFileId ? 'fileId: ' + subject.shadowedFileId : 'base64 data'})`);
+          
+          // Show uploading step for cached shadows
+          updateImageProgress(name, 'uploading', 'Using cached shadow...');
+          
+          // Brief delay to show the message
+          await new Promise(resolve => setTimeout(resolve, 150));
+          
+          // Mark as ready for compositing (not complete yet - compositing happens later)
+          updateImageProgress(name, 'shadowing', 'Loaded from cache');
+          
           newJobs.push({
             name,
             jobId: `cached-${Date.now()}-${Math.random()}`, // Fake job ID
@@ -526,6 +596,16 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
         } else {
           // No cached data - create actual shadow job
           console.log(`🔄 Creating shadow job for ${name}`);
+          
+          // Show uploading step before creating job
+          updateImageProgress(name, 'uploading', 'Uploading image...');
+          
+          // Brief delay to show uploading status
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+          // Then set compressing (server will compress before shadowing)
+          updateImageProgress(name, 'compressing', 'Compressing image...');
+          
           const { jobId } = await api.processImage(cleanCutoutData, {
             shadow: shadowOptions,
           });
@@ -541,6 +621,7 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
         console.error(`Failed to start job for ${name}:`, error);
+        updateImageProgress(name, 'error', undefined, errorMessage);
         setFailedImages(prev => [...prev, { name, error: errorMessage }]);
       }
     }
@@ -594,8 +675,14 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
 
           if (statusResult.status === 'completed') {
             job.final_image_url = statusResult.final_image_url;
+            updateImageProgress(job.name, 'shadowing', 'Shadow complete, ready to composite');
+          } else if (statusResult.status === 'processing') {
+            updateImageProgress(job.name, 'shadowing', 'Processing shadow...');
+          } else if (statusResult.status === 'pending') {
+            updateImageProgress(job.name, 'compressing', 'Waiting in queue...');
           } else if (statusResult.status === 'failed') {
             job.error_message = statusResult.error_message;
+            updateImageProgress(job.name, 'error', undefined, job.error_message || 'Shadow processing failed');
             setFailedImages(prev => [...prev.filter(f => f.name !== job.name), { name: job.name, error: job.error_message || 'Job failed' }]);
           }
         }
@@ -603,6 +690,7 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
         console.error(`Error polling job ${job.jobId}:`, error);
         job.status = 'failed';
         job.error_message = (error as Error).message;
+        updateImageProgress(job.name, 'error', undefined, job.error_message);
         setFailedImages(prev => [...prev.filter(f => f.name !== job.name), { name: job.name, error: job.error_message }]);
         needsUpdate = true;
       }
@@ -648,6 +736,9 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
           const index = startIdx + batchOffset;
           
           try {
+            // Update progress: compositing
+            updateImageProgress(job.name, 'compositing', 'Preparing to composite...');
+
             // --- Step 3: Get shadowed subject dimensions ---
             const { width: shadowedWidth, height: shadowedHeight } = await getImageDimensions(job.final_image_url!);
             if (shadowedWidth === 0 || shadowedHeight === 0) throw new Error("Shadowed subject dimensions are zero");
@@ -655,6 +746,8 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
             // --- Step 3.5: Get clean subject dimensions ---
             const { width: cleanWidth, height: cleanHeight } = await getImageDimensions(job.cleanCutoutData);
             if (cleanWidth === 0 || cleanHeight === 0) throw new Error("Clean subject dimensions are zero");
+
+            updateImageProgress(job.name, 'compositing', 'Compositing with backdrop...');
 
             // --- Step 4: Final Composite using unified layout calculation ---
             const finalImageBlob = await compositeLayersV2({
@@ -682,11 +775,13 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
             });
 
             console.log(`✅ Composited ${job.name} (${index + 1}/${successfulJobs.length})`);
+            updateImageProgress(job.name, 'complete', 'Complete!');
             return { success: true, name: job.name, compositedData: compositedDataUrl };
 
           } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "Compositing error";
             console.error(`❌ Failed to composite ${job.name}:`, error);
+            updateImageProgress(job.name, 'error', undefined, errorMessage);
             return { success: false, name: job.name, error: errorMessage };
           }
         })
@@ -821,32 +916,88 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
             <span className="font-medium">This may take several minutes. Please keep this tab open.</span>
           </div>
 
-          { (jobs.length > 0) &&
-            <div className="grid grid-cols-2 gap-4 max-h-48 overflow-y-auto bg-muted/50 p-4 rounded-lg">
-              <div className="space-y-2">
-                <h4 className="font-medium text-sm">Completed</h4>
-                <ul className="text-xs space-y-1 text-green-600">
-                  {jobs.filter(j => j.status === 'completed').map((img) => (
-                    <li key={img.name} className="flex items-center gap-1.5 truncate" data-testid={`completed-${img.name}`}>
-                      <CheckCircle className="h-3 w-3 shrink-0" />
-                      <span>{img.name}</span>
-                    </li>
-                  ))}
-                </ul>
+          {/* Detailed Per-Image Progress List */}
+          {imageProgress.size > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="font-medium text-sm">Image Progress</h4>
+                <span className="text-xs text-muted-foreground" data-testid="text-progress-summary">
+                  {Array.from(imageProgress.values()).filter(p => p.status === 'complete').length} of {imageProgress.size} complete
+                </span>
               </div>
-              <div className="space-y-2">
-                <h4 className="font-medium text-sm">Failed</h4>
-                <ul className="text-xs space-y-1 text-destructive">
-                  {jobs.filter(j => j.status === 'failed').map((img) => (
-                    <li key={img.name} className="flex items-center gap-1.5 truncate" data-testid={`failed-${img.name}`}>
-                      <AlertCircle className="h-3 w-3 shrink-0" />
-                      <span>{img.name}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              
+              <ScrollArea className="h-64 w-full rounded-md border bg-muted/30 p-3" data-testid="scroll-area-image-progress">
+                <div className="space-y-2">
+                  {Array.from(imageProgress.values())
+                    .sort((a, b) => {
+                      // Sort order: error > processing > pending > complete
+                      const statusOrder: Record<string, number> = {
+                        'error': 0,
+                        'compositing': 1,
+                        'shadowing': 2,
+                        'compressing': 3,
+                        'uploading': 4,
+                        'pending': 5,
+                        'complete': 6
+                      };
+                      return (statusOrder[a.status] || 99) - (statusOrder[b.status] || 99);
+                    })
+                    .map((progress) => {
+                      // Determine icon and color based on status
+                      let icon = <Clock className="h-4 w-4 shrink-0" />;
+                      let colorClass = 'text-muted-foreground';
+                      let bgClass = 'bg-muted/50';
+                      
+                      if (progress.status === 'complete') {
+                        icon = <CheckCircle className="h-4 w-4 shrink-0" />;
+                        colorClass = 'text-green-600 dark:text-green-500';
+                        bgClass = 'bg-green-50 dark:bg-green-950/20';
+                      } else if (progress.status === 'error') {
+                        icon = <AlertCircle className="h-4 w-4 shrink-0" />;
+                        colorClass = 'text-destructive';
+                        bgClass = 'bg-destructive/10';
+                      } else if (progress.status === 'uploading') {
+                        icon = <Upload className="h-4 w-4 shrink-0 animate-pulse" />;
+                        colorClass = 'text-blue-600 dark:text-blue-400';
+                        bgClass = 'bg-blue-50 dark:bg-blue-950/20';
+                      } else if (progress.status === 'compressing') {
+                        icon = <Minimize2 className="h-4 w-4 shrink-0 animate-pulse" />;
+                        colorClass = 'text-blue-600 dark:text-blue-400';
+                        bgClass = 'bg-blue-50 dark:bg-blue-950/20';
+                      } else if (progress.status === 'shadowing') {
+                        icon = <Moon className="h-4 w-4 shrink-0 animate-pulse" />;
+                        colorClass = 'text-purple-600 dark:text-purple-400';
+                        bgClass = 'bg-purple-50 dark:bg-purple-950/20';
+                      } else if (progress.status === 'compositing') {
+                        icon = <Wand2 className="h-4 w-4 shrink-0 animate-pulse" />;
+                        colorClass = 'text-indigo-600 dark:text-indigo-400';
+                        bgClass = 'bg-indigo-50 dark:bg-indigo-950/20';
+                      }
+                      
+                      return (
+                        <div
+                          key={progress.fileName}
+                          className={`flex items-center gap-2 p-2 rounded-md transition-colors ${bgClass}`}
+                          data-testid={`progress-item-${progress.fileName}`}
+                        >
+                          <div className={colorClass}>
+                            {icon}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium truncate" data-testid={`text-filename-${progress.fileName}`}>
+                              {progress.fileName}
+                            </p>
+                            <p className={`text-xs ${colorClass}`} data-testid={`text-step-${progress.fileName}`}>
+                              {progress.error || progress.currentStep || 'Waiting...'}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </ScrollArea>
             </div>
-          }
+          )}
 
           <Button variant="outline" onClick={handleBack} className="w-full" data-testid="button-cancel-batch">
             <ArrowLeft className="h-4 w-4 mr-2" />
