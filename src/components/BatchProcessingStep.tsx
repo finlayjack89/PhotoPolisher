@@ -21,6 +21,7 @@ import {
 } from "@/lib/canvas-utils";
 import { useWorkflow } from "@/contexts/WorkflowContext";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { createSizeBoundedBatches } from "@/lib/batch-utils";
 
 // Define the subject type
 interface Subject {
@@ -252,24 +253,23 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
         return { 
           name: subject.name, 
           fileId: fileId || undefined,
-          data: fallbackData || undefined  // Fallback for backward compatibility
+          data: fallbackData || undefined,  // Fallback for backward compatibility
+          size: subject.size || subject.originalSize  // File size in bytes for accurate batching
         };
       });
       
       setProgress(5);
       
-      // Frontend Batch Size Validation (Pre-compression estimate)
-      // NOTE: This is a user-friendly early warning to prevent large payloads.
-      // The backend performs authoritative validation (300MB limit) after compression.
-      // Frontend batching helps avoid 413 Payload Too Large errors by splitting large batches.
-      // Batch size of 7 is an estimate based on typical compressed image sizes (~10-15MB each).
-      const BATCH_SIZE = 7;
-      const batches: Array<typeof imagesToProcess> = [];
-      for (let i = 0; i < imagesToProcess.length; i += BATCH_SIZE) {
-        batches.push(imagesToProcess.slice(i, i + BATCH_SIZE));
-      }
-      
-      console.log(`📦 Split ${imagesToProcess.length} images into ${batches.length} batches of ~${BATCH_SIZE} images each`);
+      // Size-Bounded Batch Creation (Phase 2 optimization - CRITICAL BUG FIX)
+      // Creates batches based on actual cumulative size rather than just image count.
+      // This prevents issues where a few large images could exceed the 300MB API limit
+      // even with a low batch size (e.g., a 300MB image + 4x5MB images = 320MB > limit).
+      // 
+      // Safety rules:
+      // - Max batch size: 200MB (safe buffer under 300MB limit)
+      // - Min batch size: 1 image (handles single huge image edge case)
+      // - Max images per batch: 15 (prevents too many small images)
+      const batches = await createSizeBoundedBatches(imagesToProcess, 200);
       
       // Process batches with parallelization (2-3 batches at a time)
       const PARALLEL_BATCHES = 2;
