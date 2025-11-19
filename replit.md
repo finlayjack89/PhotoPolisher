@@ -34,6 +34,12 @@ Preferred communication style: Simple, everyday language.
 - **Canvas Compositing**: Redesigned to match CSS preview behavior with width-first scaling and proper layer ordering (Backdrop → Shadow → Reflection → Clean Product).
 - **Intelligent Auto-Deskew System**: Automated straightening of tilted product images using morphological operations, connected component analysis, RANSAC line fitting, and confidence scoring.
 
+### Phase 1 Optimizations (November 2025)
+- **File ID Architecture for Shadows**: Eliminated large base64 payloads in shadow batch API responses (100x reduction from ~50MB to ~500KB) by storing shadowed images as files and returning opaque file IDs. All code paths (success + errors) correctly return `shadowedFileId` for frontend consumption via `/api/files/:id`.
+- **Harmonized File Size Limits**: Unified upload limits to 40MB across Multer middleware, Express payload parser, and frontend validation to support 4K+ high-resolution product images without inconsistencies.
+- **Optimized Compression Settings**: Increased target from 5MB to 8MB and max dimension from 2048px to 3072px for better quality while maintaining performance and bandwidth efficiency.
+- **Code Consolidation**: Created `server/utils/fetch-utils.ts` (fetchWithTimeout, retryWithBackoff) and `src/lib/file-utils.ts` (fileToDataUrl, formatFileSize, loadImage) to eliminate duplicate implementations across codebase. Removed deprecated `compress-images.ts`.
+
 ## External Dependencies
 
 ### AI & Image Processing Services
