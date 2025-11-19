@@ -1,0 +1,86 @@
+The reflection is generating correctly but is not visible in the final output. This is likely due to "Canvas Clipping" (drawing off-screen) or "Layer Occlusion".
+
+Please update `src/lib/canvas-utils.ts` to implement **Auto-Layout Logic** and **Strict Layer Ordering**.
+
+### Update 1: Implement Auto-Lift Logic
+In `compositeLayers`, before drawing anything, check if the product allows room for the reflection. If not, shift `subjectY` upwards.
+
+```typescript
+// Inside compositeLayers, BEFORE any drawing operations:
+
+// 1. Calculate Reflection Dimensions
+const reflectionHeight = subjectHeight * 0.6;
+const gap = 2;
+const totalVisualHeight = subjectHeight + reflectionHeight;
+
+// 2. Auto-Lift Logic (Prevents clipping)
+// If the reflection would fall off the canvas bottom...
+let finalSubjectY = subjectY;
+if (showReflection) {
+  const bottomEdge = finalSubjectY + subjectHeight + reflectionHeight - gap;
+  const canvasBottom = canvas.height;
+  
+  if (bottomEdge > canvasBottom) {
+    // ...Calculate how much we need to move up
+    const overflow = bottomEdge - canvasBottom;
+    // Add a 20px safety margin
+    finalSubjectY = finalSubjectY - overflow - 20;
+    
+    console.log(`[Auto-Layout] Lifted subject by ${overflow + 20}px to fit reflection`);
+  }
+}
+
+// Update your draw calls to use 'finalSubjectY' instead of 'subjectY'
+Update 2: Enforce Layer Order (Z-Index)
+Ensure the drawing order in compositeLayers follows this exact sequence to prevent the backdrop from hiding the reflection.
+
+Correct Sequence:
+
+TypeScript
+
+// 1. DRAW BACKDROP (Base Layer)
+// [Insert backdrop drawing code here]
+
+// 2. DRAW DROP SHADOW (Optional)
+// [Insert shadow drawing code here]
+
+// 3. DRAW REFLECTION (Middle Layer)
+if (showReflection) {
+  // ... generation code ...
+  
+  const reflectionY = Math.floor(finalSubjectY + subjectHeight - gap);
+  
+  // DEBUG: Uncomment to see the bounding box if reflection is still invisible
+  // ctx.strokeStyle = 'red';
+  // ctx.strokeRect(subjectX, reflectionY, subjectWidth, reflectionHeight);
+
+  ctx.drawImage(
+    reflectionCanvas, 
+    Math.floor(subjectX), 
+    reflectionY, 
+    Math.floor(subjectWidth), 
+    Math.floor(reflectionHeight)
+  );
+}
+
+// 4. DRAW SUBJECT (Top Layer)
+ctx.drawImage(
+  subjectImg, 
+  Math.floor(subjectX), 
+  Math.floor(finalSubjectY), // Use the Lifted Y
+  Math.floor(subjectWidth), 
+  Math.floor(subjectHeight)
+);
+Verification
+Upload a product and place it near the bottom.
+
+Enable Reflection.
+
+The product should automatically "jump" up to make space for the reflection.
+
+The reflection should be visible against the backdrop.
+
+
+### **Why this fixes it:**
+* **Auto-Lift:** Guarantees the reflection pixels are actually inside the canvas coordinate space (`0` to `height`).
+* **Variables:** Using `finalSubjectY` ensures that the Shadow, Reflection, and Subject all move together while maintaining their relative alignment.

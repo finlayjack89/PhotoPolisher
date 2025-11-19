@@ -1,0 +1,145 @@
+The "invisible reflection" issue is indeed caused by canvas clipping and layer occlusion, as confirmed by your logs and visual evidence. When a product is placed near the bottom edge, the reflection (which extends downwards) is drawn outside the canvas boundaries.
+
+The Replit plan is sound, but it needs to be implemented precisely to handle all coordinate shifts correctly. Here is the exact, corrected code for src/lib/canvas-utils.ts.
+
+The Fix Strategy
+Auto-Lift Logic: Before drawing, we calculate if Reflection Bottom > Canvas Height. If it is, we shift everything (shadow, product, reflection) upwards.
+
+Strict Layer Ordering: We enforce Backdrop -> Shadow -> Reflection -> Product to prevent the shadow or backdrop from painting over the reflection.
+
+Unified Coordinates: We introduce finalSubjectY and finalShadowY variables so all layers move in sync when "lifted".
+
+Action: Update src/lib/canvas-utils.ts
+Replace your existing compositeLayersV2 function (and the older compositeLayers if used) with this updated version. This implementation adds the "Auto-Lift" logic and fixes the Z-Index issue.
+
+TypeScript
+
+// src/lib/canvas-utils.ts
+
+// ... keep existing imports and interfaces ...
+
+export async function compositeLayersV2(
+  options: CompositeLayersV2Options
+): Promise<Blob | null> {
+  const {
+    backdropUrl,
+    shadowedSubjectUrl,
+    cleanSubjectUrl,
+    shadowedSubjectWidth,
+    shadowedSubjectHeight,
+    cleanSubjectWidth,
+    cleanSubjectHeight,
+    placement,
+    paddingPercent,
+    aspectRatio,
+    numericAspectRatio,
+    reflectionOptions
+  } = options;
+
+  // 1. Compute unified layout
+  const layout = computeCompositeLayout(
+    shadowedSubjectWidth,
+    shadowedSubjectHeight,
+    cleanSubjectWidth,
+    cleanSubjectHeight,
+    paddingPercent,
+    aspectRatio,
+    numericAspectRatio,
+    placement
+  );
+
+  // 2. Create canvas
+  const canvas = document.createElement('canvas');
+  canvas.width = layout.canvasWidth;
+  canvas.height = layout.canvasHeight;
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    console.error('Failed to get canvas context');
+    return null;
+  }
+
+  try {
+    // 3. Load all images
+    const [backdropImg, shadowedSubjectImg, cleanSubjectImg] = await Promise.all([
+      loadImage(backdropUrl),
+      loadImage(shadowedSubjectUrl),
+      loadImage(cleanSubjectUrl)
+    ]);
+
+    console.log('🎨 [Compositing V2] Starting render with Auto-Lift');
+
+    // --- AUTO-LIFT LOGIC START ---
+    // Calculate where the reflection would naturally end
+    const reflectionHeight = Math.round(layout.productRect.height * 0.6);
+    const GAP = 2; 
+    const visualBottom = layout.productRect.y + layout.productRect.height + reflectionHeight - GAP;
+    
+    // Calculate shift needed if it overflows canvas
+    let liftAmount = 0;
+    if (reflectionOptions && reflectionOptions.opacity > 0) {
+        const overflow = visualBottom - canvas.height;
+        if (overflow > 0) {
+            // Lift by overflow amount + 20px safety padding
+            liftAmount = overflow + 20; 
+            console.log(`🚀 [Auto-Lift] Shifting subject up by ${liftAmount}px to fit reflection`);
+        }
+    }
+
+    // Apply shift to all components
+    const shadowY = layout.shadowedSubjectRect.y - liftAmount;
+    const productY = layout.productRect.y - liftAmount;
+    // --- AUTO-LIFT LOGIC END ---
+
+    // 4. Draw Backdrop (Bottom Layer)
+    ctx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
+
+    // 5. Draw Shadow (Middle Layer 1)
+    ctx.drawImage(
+        shadowedSubjectImg, 
+        layout.shadowedSubjectRect.x, 
+        shadowY, // Use lifted Y
+        layout.shadowedSubjectRect.width, 
+        layout.shadowedSubjectRect.height
+    );
+
+    // 6. Draw Reflection (Middle Layer 2) - MUST be before Product
+    if (reflectionOptions && reflectionOptions.opacity > 0) {
+      const adjustedReflectionRect = {
+        x: layout.productRect.x,
+        y: productY + layout.productRect.height - GAP, // Use lifted productY
+        width: layout.productRect.width,
+        height: reflectionHeight
+      };
+      
+      await drawReflection(ctx, cleanSubjectImg, adjustedReflectionRect, reflectionOptions);
+    }
+
+    // 7. Draw Clean Product (Top Layer)
+    ctx.drawImage(
+        cleanSubjectImg, 
+        layout.productRect.x, 
+        productY, // Use lifted Y
+        layout.productRect.width, 
+        layout.productRect.height
+    );
+
+    // 8. Export
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, 'image/png');
+    });
+    
+    return blob;
+  } catch (error) {
+    console.error('Error during canvas compositing V2:', error);
+    return null;
+  } finally {
+    cleanupCanvas(canvas);
+  }
+}
+Why this solves the "Invisible Reflection":
+Physics Enforcement: By calculating visualBottom (Product Bottom + Reflection Height) before drawing, we guarantee the reflection pixels exist inside the canvas coordinate space (0 to canvas.height).
+
+Synchronized Movement: The liftAmount is subtracted from both the Shadow Y and Product Y. This keeps the shadow perfectly aligned with the product feet, even when they move up.
+
+Z-Index Integrity: Drawing the Reflection after the Shadow but before the Product ensures the reflection isn't hidden by the shadow bounding box, and the "clean" product edge sits nicely on top of the reflection start point.
