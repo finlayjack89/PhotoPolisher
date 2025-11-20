@@ -60,6 +60,43 @@ function getBottomPadding(img: HTMLImageElement): number {
   }
 }
 
+/**
+ * Generates a lightweight "Contact Shadow" (Ambient Occlusion) for grounding.
+ * Uses a downscaled canvas for high performance and low memory usage.
+ * 
+ * @param img - The image to generate shadow from
+ * @returns Canvas with black silhouette, or null if generation fails
+ */
+function generateContactShadow(
+  img: HTMLImageElement
+): HTMLCanvasElement | null {
+  try {
+    const canvas = document.createElement('canvas');
+    // Optimization: Limit shadow resolution to 500px. 
+    // It will be blurred anyway, so we don't need 4K precision.
+    const scale = Math.min(1, 500 / img.naturalWidth);
+    
+    canvas.width = img.naturalWidth * scale;
+    canvas.height = img.naturalHeight * scale;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    // 1. Draw the silhouette
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    
+    // 2. Turn it solid black (Source-In)
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    return canvas;
+  } catch (e) {
+    console.warn('⚠️ Contact shadow generation warning:', e);
+    return null; // Fail gracefully, don't crash the app
+  }
+}
+
 export interface SubjectPlacement {
   x: number; // Horizontal position (0-1, where 0.5 is center)
   y: number; // Vertical position (0-1, where 0 is top, 1 is bottom)
@@ -588,6 +625,39 @@ export async function compositeLayersV2(
       
       await drawReflection(ctx, cleanSubjectImg, adjustedReflectionRect, reflectionOptions);
     }
+
+    // --- NEW FEATURE: CONTACT SHADOW (Safe Mode) ---
+    try {
+      const footprint = generateContactShadow(cleanSubjectImg);
+      
+      if (footprint) {
+        ctx.save();
+        try {
+          // Configuration for "Grounding" Look
+          const shadowH = layout.productRect.height * 0.15; // Squash to 15% height
+          const shadowW = layout.productRect.width;
+          
+          // Position: Aligned with bottom, tucked slightly underneath
+          // (shadowH * 0.6) moves the dark center under the object
+          const shadowY = productY + layout.productRect.height - (shadowH * 0.6);
+          const shadowX = layout.productRect.x;
+
+          // Style: Soft blur + 40% opacity
+          ctx.filter = 'blur(8px)'; 
+          ctx.globalAlpha = 0.4;    
+          
+          ctx.drawImage(footprint, shadowX, shadowY, shadowW, shadowH);
+          
+          console.log('🌑 [Contact Shadow] Applied grounding effect');
+        } finally {
+          ctx.restore(); // CRITICAL: Always reset state even if error occurs
+          cleanupCanvas(footprint); // Clean up footprint canvas to reclaim memory
+        }
+      }
+    } catch (err) {
+      console.warn('⚠️ Skipping contact shadow due to error:', err);
+    }
+    // -----------------------------------------------
 
     // 7. Draw Clean Product (Top Layer)
     ctx.drawImage(

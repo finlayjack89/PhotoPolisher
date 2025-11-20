@@ -1,0 +1,93 @@
+I need to implement a "Contact Shadow" (Ambient Occlusion) to ground the subject, but it must be implemented in **Safe Mode** to prevent any compositing failures.
+
+Please update `src/lib/canvas-utils.ts` with these two changes:
+
+### 1. Add the Safe Generator Function
+Add this function at the top of the file. Note the `try/catch` block and the size limit (500px) to prevent memory crashes on mobile devices.
+
+```typescript
+/**
+ * Generates a lightweight "Contact Shadow" (Ambient Occlusion) for grounding.
+ * Uses a downscaled canvas for high performance and low memory usage.
+ */
+function generateContactShadow(
+  img: HTMLImageElement
+): HTMLCanvasElement | null {
+  try {
+    const canvas = document.createElement('canvas');
+    // Optimization: Limit shadow resolution to 500px. 
+    // It will be blurred anyway, so we don't need 4K precision.
+    const scale = Math.min(1, 500 / img.naturalWidth);
+    
+    canvas.width = img.naturalWidth * scale;
+    canvas.height = img.naturalHeight * scale;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    // 1. Draw the silhouette
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    
+    // 2. Turn it solid black (Source-In)
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    return canvas;
+  } catch (e) {
+    console.warn('⚠️ Contact shadow generation warning:', e);
+    return null; // Fail gracefully, don't crash the app
+  }
+}
+2. Integrate into compositeLayersV2 (Sandboxed)
+Inside the compositeLayersV2 function, locate the space after the Reflection drawing but before the clean product drawing.
+
+Insert this specific block. It uses ctx.save()/restore() and a try/catch wrapper to ensure that no matter what happens here, the final product will still be drawn correctly.
+
+TypeScript
+
+    // ... existing reflection code ...
+
+    // --- NEW FEATURE: CONTACT SHADOW (Safe Mode) ---
+    try {
+      const footprint = generateContactShadow(cleanSubjectImg);
+      
+      if (footprint) {
+        ctx.save();
+        
+        // Configuration for "Grounding" Look
+        const shadowH = layout.productRect.height * 0.15; // Squash to 15% height
+        const shadowW = layout.productRect.width;
+        
+        // Position: Aligned with bottom, tucked slightly underneath
+        // (contactH * 0.6) moves the dark center under the object
+        const shadowY = productY + layout.productRect.height - (shadowH * 0.6);
+        const shadowX = layout.productRect.x;
+
+        // Style: Soft blur + 40% opacity
+        ctx.filter = 'blur(8px)'; 
+        ctx.globalAlpha = 0.4;    
+        
+        ctx.drawImage(footprint, shadowX, shadowY, shadowW, shadowH);
+        
+        ctx.restore(); // CRITICAL: Reset filter so Product isn't blurred
+        console.log('🌑 [Contact Shadow] Applied grounding effect');
+      }
+    } catch (err) {
+      console.warn('⚠️ Skipping contact shadow due to error:', err);
+    }
+    // -----------------------------------------------
+
+    // 7. Draw Clean Product (Existing Code - DO NOT MODIFY)
+    ctx.drawImage(
+        cleanSubjectImg, 
+        layout.productRect.x, 
+        productY, 
+        layout.productRect.width, 
+        layout.productRect.height
+    );
+Why this is safe:
+
+Isolation: The try/catch block ensures that even if the shadow calculation fails, the code will continue to step #7 and render your product.
+
+State Protection: ctx.save() and restore() guarantee that the blur filter won't accidentally apply to the shoe itself.
