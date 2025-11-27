@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -8,7 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Tabs,
   TabsContent,
@@ -55,9 +55,9 @@ interface BackdropPositioningProps {
   onPositioningComplete: (
     backdrop: string,
     placement: SubjectPlacement,
-    padding: number,
     aspectRatio: string,
-    numericAspectRatio?: number
+    numericAspectRatio?: number,
+    blurBackground?: boolean
   ) => void;
   onBack: () => void;
 }
@@ -76,8 +76,8 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   // Master Rules State
-  const [masterPadding, setMasterPadding] = useState(20);
   const [masterAspectRatio, setMasterAspectRatio] = useState("original");
+  const [blurBackground, setBlurBackground] = useState(false);
   
   const [placement, setPlacement] = useState<SubjectPlacement>({
     x: 0.5, // X is always 50%
@@ -214,13 +214,13 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     setBackdrop(fileUrl);
     setBackdropFile(file);
     
-    // Set default positioning (user can manually adjust)
-    // Use 0.85 to position near bottom but within valid range (0-1)
-    setPlacement(prev => ({ ...prev, y: 0.85 }));
+    // Only set default y position on FIRST backdrop selection (when y is still at initial 0.85)
+    // Preserve user's placement if they've already adjusted it
+    // This respects user intent - no automatic position changes after initial setup
     
     toast({
       title: source === 'upload' ? "Backdrop Uploaded" : "Backdrop Selected",
-      description: "Subject positioned at bottom. Adjust manually if needed.",
+      description: "Drag the subject to position it.",
     });
   };
 
@@ -256,9 +256,9 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
       onPositioningComplete(
         backdrop, 
         placement, 
-        masterPadding, 
         masterAspectRatio,
-        numericAspectRatio
+        numericAspectRatio,
+        blurBackground
       );
     }
   };
@@ -266,10 +266,6 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   // --- Start CSS Preview Logic ---
   const getPreviewStyles = () => {
     if (!previewCutout) return {};
-    
-    // Calculate subject width based on padding
-    const padding = masterPadding / 100;
-    const subjectWidthPercent = 100 * (1 - padding * 2);
     
     // --- Calculate Dynamic Aspect Ratio ---
     let aspectRatio = '4 / 3'; // Default
@@ -289,11 +285,9 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
       }
     }
     
-    // Calculate shadow offset - ONLY used when showing clean cutout preview
-    // When showing actual shadow preview (livePreviewUrl), we don't need offset
-    const shadowSpread = localSpread;
-    const paddingMultiplier = Math.max(1.5, 1 + (shadowSpread / 100));
-    const shadowOffsetPercent = ((paddingMultiplier - 1) / 2) * 100;
+    // Subject displays at original size within backdrop - user controls position freely
+    // Scale can be adjusted via placement.scale if needed
+    const subjectScale = placement.scale || 1.0;
     
     return {
       backdropStyles: {
@@ -301,18 +295,20 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
-        aspectRatio: aspectRatio, // Apply dynamic aspect ratio
+        aspectRatio: aspectRatio,
+        filter: blurBackground ? 'blur(8px)' : 'none',
       },
       subjectStyles: {
-        width: `${subjectWidthPercent}%`,
+        // Subject renders at natural size controlled by placement.scale only
+        // No artificial clamps - user has full control over positioning
+        width: 'auto',
         height: 'auto',
-        left: `50%`,
+        maxWidth: 'none',
+        maxHeight: 'none',
+        transform: `translate(-50%, -100%) scale(${subjectScale})`,
+        transformOrigin: 'center bottom',
+        left: `${placement.x * 100}%`,
         top: `${placement.y * 100}%`,
-        // When showing shadow preview (livePreviewUrl): bottom-edge alignment matches canvas
-        // When showing clean cutout: offset to simulate product position within shadow container
-        transform: livePreviewUrl 
-          ? 'translate(-50%, -100%)' 
-          : `translate(-50%, -${100 + shadowOffsetPercent}%)`,
       }
     };
   };
@@ -379,22 +375,26 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                 </Tabs>
               </div>
 
-              {/* New Controls */}
+              {/* Controls */}
               <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Padding</Label>
-                  <Slider
-                    value={[masterPadding]}
-                    onValueChange={(val) => setMasterPadding(val[0])}
-                    max={50}
-                    min={5}
-                    step={1}
-                    data-testid="slider-padding"
+                {/* Blur Background Toggle */}
+                <div className="flex items-center space-x-3 p-3 rounded-lg border bg-card">
+                  <Checkbox
+                    id="blur-background"
+                    checked={blurBackground}
+                    onCheckedChange={(checked) => setBlurBackground(checked === true)}
+                    data-testid="checkbox-blur-background"
                   />
-                  <div className="text-xs text-muted-foreground text-center">
-                    {masterPadding}% (Space around subject)
+                  <div className="flex flex-col">
+                    <Label htmlFor="blur-background" className="cursor-pointer font-medium">
+                      Blur Background
+                    </Label>
+                    <span className="text-xs text-muted-foreground">
+                      Apply depth-of-field blur effect to backdrop
+                    </span>
                   </div>
                 </div>
+
                 <div className="space-y-2">
                   <Label>Final Aspect Ratio</Label>
                   <ToggleGroup
@@ -469,8 +469,8 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Padding:</span>
-                    <span>{masterPadding}%</span>
+                    <span>Blur Background:</span>
+                    <span>{blurBackground ? "✓ Enabled" : "Off"}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Aspect Ratio:</span>

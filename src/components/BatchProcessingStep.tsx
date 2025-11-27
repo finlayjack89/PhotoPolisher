@@ -44,10 +44,9 @@ interface Subject {
 
 interface MasterRules {
   placement: SubjectPlacement;
-  padding: number;
   aspectRatio: string;
   numericAspectRatio?: number;  // Pre-calculated numeric ratio for "original" mode
-  // TODO: These should be passed in from ProductConfiguration
+  blurBackground?: boolean;
   shadowOptions?: any; 
   reflectionOptions?: ReflectionOptions;
 }
@@ -89,43 +88,6 @@ export interface ImageProgress {
   currentStep?: string;
   error?: string;
 }
-
-// Client-side crop calculation
-const calculateCanvasSize = (
-  subjectW: number,
-  subjectH: number,
-  padding: number,
-  aspectRatio: string,
-  numericAspectRatio?: number
-) => {
-  const paddingPercent = padding / 100;
-
-  // 1. Calculate padded subject size
-  const paddedW = subjectW / (1 - paddingPercent * 2);
-  const paddedH = subjectH / (1 - paddingPercent * 2);
-
-  // 2. Determine final aspect ratio
-  let finalAspectRatio: number;
-  if (aspectRatio === '1:1') finalAspectRatio = 1;
-  else if (aspectRatio === '4:3') finalAspectRatio = 4 / 3;
-  else if (aspectRatio === '3:4') finalAspectRatio = 3 / 4;
-  else if (aspectRatio === 'original' && numericAspectRatio) {
-    // Use pre-calculated backdrop aspect ratio for "original" mode
-    finalAspectRatio = numericAspectRatio;
-  }
-  else finalAspectRatio = paddedW / paddedH; // Fallback to subject dimensions
-
-  // 3. Determine final canvas size
-  let canvasW = paddedW;
-  let canvasH = canvasW / finalAspectRatio;
-
-  if (canvasH < paddedH) {
-    canvasH = paddedH;
-    canvasW = canvasH * finalAspectRatio;
-  }
-
-  return { width: Math.round(canvasW), height: Math.round(canvasH) };
-};
 
 export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
   subjects,
@@ -769,10 +731,10 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
               cleanSubjectWidth: cleanWidth,
               cleanSubjectHeight: cleanHeight,
               placement: masterRules.placement,
-              paddingPercent: masterRules.padding,
               aspectRatio: masterRules.aspectRatio,
               numericAspectRatio: masterRules.numericAspectRatio,
-              reflectionOptions: masterRules.reflectionOptions
+              reflectionOptions: masterRules.reflectionOptions,
+              blurBackground: masterRules.blurBackground
             });
 
             if (!finalImageBlob) throw new Error("Canvas compositing failed");

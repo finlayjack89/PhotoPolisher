@@ -36,9 +36,9 @@ interface ProcessedImages {
   backgroundRemoved: Array<{ name: string; originalData: string; backgroundRemovedData: string; size: number; }>;
   backdrop?: string;
   placement?: SubjectPlacement;
-  masterPadding?: number;
   masterAspectRatio?: string;
   numericAspectRatio?: number;
+  blurBackground?: boolean;
   finalComposited?: Array<{ name: string; compositedData: string; }>;
 }
 
@@ -139,15 +139,15 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
   const handlePositioningComplete = (
     backdrop: string, 
     placement: SubjectPlacement, 
-    masterPadding: number, 
     masterAspectRatio: string,
-    numericAspectRatio?: number
+    numericAspectRatio?: number,
+    blurBackground?: boolean
   ) => {
     console.log('🎯 Master setup completed');
     console.log(`📊 Backdrop format: ${backdrop?.substring(0, 50)}`);
     console.log(`📐 Placement: ${JSON.stringify(placement)}`);
-    console.log(`🎨 Master padding: ${masterPadding}`);
     console.log(`📏 Master aspect ratio: ${masterAspectRatio}`);
+    console.log(`🌫️ Blur background: ${blurBackground}`);
     if (numericAspectRatio) {
       console.log(`📏 Numeric aspect ratio: ${numericAspectRatio}`);
     }
@@ -156,9 +156,9 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
       ...prev, 
       backdrop, 
       placement, 
-      masterPadding, 
       masterAspectRatio,
-      numericAspectRatio
+      numericAspectRatio,
+      blurBackground
     }));
     
     setCurrentStep('batch-processing');
@@ -235,8 +235,7 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
   }
 
   if (currentStep === 'batch-processing') {
-    if (!processedImages.backdrop || !processedImages.placement || 
-        processedImages.masterPadding === undefined || !processedImages.masterAspectRatio) {
+    if (!processedImages.backdrop || !processedImages.placement || !processedImages.masterAspectRatio) {
       toast({
         title: "Missing Master Setup",
         description: "Please complete the master setup before batch processing",
@@ -257,9 +256,9 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
         backdrop={processedImages.backdrop}
         masterRules={{
           placement: processedImages.placement,
-          padding: processedImages.masterPadding,
           aspectRatio: processedImages.masterAspectRatio,
-          numericAspectRatio: processedImages.numericAspectRatio
+          numericAspectRatio: processedImages.numericAspectRatio,
+          blurBackground: processedImages.blurBackground
         }}
         isPreCut={false}
         onComplete={async (results) => {

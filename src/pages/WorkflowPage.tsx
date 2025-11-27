@@ -245,42 +245,6 @@ const WorkflowPage = () => {
           </Alert>
         ) : (
           <>
-            {step === 'remove-bg' && state.uploadedFileIds.length > 0 && (
-              <Card className="mb-6">
-                <CardHeader>
-                  <CardTitle>Quick Actions</CardTitle>
-                  <CardDescription>
-                    Use these shortcuts to process your images
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="flex gap-4">
-                  <Button
-                    onClick={handleRemoveBackground}
-                    disabled={removeBackgroundMutation.isPending}
-                    data-testid="button-remove-background"
-                  >
-                    {removeBackgroundMutation.isPending ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Processing...
-                      </>
-                    ) : (
-                      <>
-                        <Scissors className="h-4 w-4 mr-2" />
-                        Remove Background ({state.uploadedFileIds.length} files)
-                      </>
-                    )}
-                  </Button>
-                  
-                  {state.processedSubjects.length > 0 && (
-                    <div className="text-sm text-muted-foreground flex items-center">
-                      ✓ {state.processedSubjects.length} images processed
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
             {step === 'finalize' && (
               <Card className="mb-6">
                 <CardHeader>

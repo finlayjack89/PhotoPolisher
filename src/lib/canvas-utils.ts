@@ -92,96 +92,57 @@ export interface CompositeLayout {
  * Computes the complete layout for compositing, ensuring preview and batch output match exactly.
  * This unified calculation function ensures CSS preview and canvas output have identical dimensions and positioning.
  * 
+ * Subject displays at user-controlled scale within the backdrop with user-controlled positioning.
+ * No automatic padding or scaling manipulation - users have full control.
+ * 
+ * @param canvasW - Canvas width (determined by backdrop or aspect ratio)
+ * @param canvasH - Canvas height (determined by backdrop or aspect ratio)
  * @param subjectShadowW - Width of shadowed subject image (includes Cloudinary padding)
  * @param subjectShadowH - Height of shadowed subject image (includes Cloudinary padding)
  * @param subjectCleanW - Width of clean subject image (actual product, no padding)
  * @param subjectCleanH - Height of clean subject image (actual product, no padding)
- * @param paddingPercent - Padding percentage (e.g., 20 for 20%)
- * @param aspectRatio - Target aspect ratio ('1:1', '3:4', '4:3', 'original')
- * @param numericAspectRatio - Numeric aspect ratio for 'original' mode (width/height)
- * @param placement - Subject placement coordinates (x, y normalized 0-1)
+ * @param placement - Subject placement coordinates (x, y normalized 0-1, scale for user control)
  */
 export function computeCompositeLayout(
+  canvasW: number,
+  canvasH: number,
   subjectShadowW: number,
   subjectShadowH: number,
   subjectCleanW: number,
   subjectCleanH: number,
-  paddingPercent: number,
-  aspectRatio: string,
-  numericAspectRatio: number | undefined,
   placement: SubjectPlacement
 ): CompositeLayout {
   /**
-   * ARCHITECTURE - Matches CSS Preview Behavior:
+   * ARCHITECTURE - User-Controlled Positioning:
    * 
-   * CSS Preview does:
-   *   - Container sets the aspect ratio
-   *   - Subject WIDTH = (1 - 2*p) * containerWidth
-   *   - Subject HEIGHT = auto (maintains natural aspect ratio)
-   * 
-   * Canvas must do:
-   *   - Canvas width determined by shadow width and padding
-   *   - Canvas height determined by width and aspect ratio
-   *   - Shadow scales to fit (1-2p) of canvas WIDTH
-   *   - Shadow height is whatever it naturally is at this scale
-   *   - Letterboxing (empty space) if shadow doesn't fill canvas height
+   * Canvas dimensions are provided (based on backdrop).
+   * Subject displays at user-controlled scale (placement.scale).
+   * Position is controlled via placement.x and placement.y (normalized 0-1).
+   * No automatic padding or scaling - subject renders at original size when scale=1.
    */
-  const p = paddingPercent / 100;
 
-  // 1. Determine target aspect ratio
-  let targetRatio: number;
-  if (aspectRatio === '1:1') targetRatio = 1;
-  else if (aspectRatio === '4:3') targetRatio = 4 / 3;
-  else if (aspectRatio === '3:4') targetRatio = 3 / 4;
-  else if (aspectRatio === 'original' && numericAspectRatio) {
-    targetRatio = numericAspectRatio;
-  } else {
-    // Fallback to shadow dimensions
-    targetRatio = subjectShadowW / subjectShadowH;
-  }
-
-  // 2. Calculate canvas dimensions (WIDTH-BASED like CSS preview)
-  // Canvas width is sized so shadow occupies (1-2p) of it
-  const canvasW = subjectShadowW / (1 - 2 * p);
-  // Canvas height comes from aspect ratio
-  const canvasH = canvasW / targetRatio;
-
-  // 3. Calculate scale factor
-  // Start with width-based scale (primary constraint, like CSS preview)
-  // This ensures shadow occupies (1-2p) of canvas WIDTH
-  const scaleW = ((1 - 2 * p) * canvasW) / subjectShadowW;
+  // Use user-controlled scale directly (default 1.0 = original size)
+  const userScale = placement.scale || 1.0;
   
-  // Calculate what height would be at this scale
-  const scaledHeight = subjectShadowH * scaleW;
+  // Calculate shadowed subject drawing dimensions with user scale
+  // When userScale=1, subject is drawn at its exact original pixel dimensions
+  const drawWidth = subjectShadowW * userScale;
+  const drawHeight = subjectShadowH * userScale;
   
-  // If the scaled height would CLIP (exceed full canvas), reduce scale to fit
-  // Note: We check against FULL canvas height, not (1-2p)*canvasH
-  // This allows letterboxing but prevents actual overflow
-  let scale: number;
-  if (scaledHeight > canvasH) {
-    // Tall asset - scale to fit full canvas height instead
-    scale = canvasH / subjectShadowH;
-  } else {
-    // Normal case - use width-based scale
-    scale = scaleW;
-  }
-
-  // 5. Calculate shadowed subject drawing dimensions and position
-  const drawWidth = subjectShadowW * scale;
-  const drawHeight = subjectShadowH * scale;
+  // Position based on placement coordinates (x is center, y is bottom alignment)
   const subjectX = canvasW * placement.x - drawWidth / 2;
-  const subjectY = canvasH * placement.y - drawHeight; // y represents bottom alignment
+  const subjectY = canvasH * placement.y - drawHeight;
 
-  // 6. Calculate actual product (clean image) position within shadowed subject
+  // Calculate actual product (clean image) position within shadowed subject
   // Cloudinary c_lpad centers the product both horizontally and vertically
-  const offsetX = ((subjectShadowW - subjectCleanW) / 2) * scale;
-  const offsetY = ((subjectShadowH - subjectCleanH) / 2) * scale;
+  const offsetX = ((subjectShadowW - subjectCleanW) / 2) * userScale;
+  const offsetY = ((subjectShadowH - subjectCleanH) / 2) * userScale;
   const productX = subjectX + offsetX;
   const productY = subjectY + offsetY;
-  const productWidth = subjectCleanW * scale;
-  const productHeight = subjectCleanH * scale;
+  const productWidth = subjectCleanW * userScale;
+  const productHeight = subjectCleanH * userScale;
 
-  // 7. Calculate reflection position (directly below product)
+  // Calculate reflection position (directly below product)
   const reflectionX = productX;
   const reflectionY = productY + productHeight;
   const reflectionWidth = productWidth;
@@ -189,17 +150,15 @@ export function computeCompositeLayout(
 
   console.log('📐 [Layout Calculation]', {
     input: {
+      canvas: { w: canvasW, h: canvasH },
       shadowDims: { w: subjectShadowW, h: subjectShadowH },
       cleanDims: { w: subjectCleanW, h: subjectCleanH },
-      padding: paddingPercent,
-      aspectRatio,
       placement
     },
     calculated: {
-      targetRatio,
-      canvas: { w: canvasW, h: canvasH },
-      scale,
-      widthBased: true
+      userScale,
+      userControlled: true,
+      noAutoPadding: true
     },
     output: {
       shadowedSubject: { x: subjectX, y: subjectY, w: drawWidth, h: drawHeight },
@@ -229,7 +188,7 @@ export function computeCompositeLayout(
       width: Math.round(reflectionWidth),
       height: Math.round(reflectionHeight)
     },
-    scale
+    scale: userScale
   };
 }
 
@@ -303,10 +262,10 @@ export interface CompositeLayersV2Options {
   cleanSubjectWidth: number;
   cleanSubjectHeight: number;
   placement: SubjectPlacement;
-  paddingPercent: number;
   aspectRatio: string;
   numericAspectRatio?: number;
   reflectionOptions?: ReflectionOptions;
+  blurBackground?: boolean;
 }
 
 export async function compositeLayersV2(
@@ -321,44 +280,71 @@ export async function compositeLayersV2(
     cleanSubjectWidth,
     cleanSubjectHeight,
     placement,
-    paddingPercent,
     aspectRatio,
     numericAspectRatio,
-    reflectionOptions
+    reflectionOptions,
+    blurBackground
   } = options;
 
-  // 1. Compute unified layout
-  const layout = computeCompositeLayout(
-    shadowedSubjectWidth,
-    shadowedSubjectHeight,
-    cleanSubjectWidth,
-    cleanSubjectHeight,
-    paddingPercent,
-    aspectRatio,
-    numericAspectRatio,
-    placement
-  );
-
-  // 2. Create canvas with calculated dimensions
-  const canvas = document.createElement('canvas');
-  canvas.width = layout.canvasWidth;
-  canvas.height = layout.canvasHeight;
-  const ctx = canvas.getContext('2d');
-
-  if (!ctx) {
-    console.error('Failed to get canvas context');
-    return null;
-  }
-
   try {
-    // 3. Load all images
+    // 1. Load all images first to get backdrop dimensions
     const [backdropImg, shadowedSubjectImg, cleanSubjectImg] = await Promise.all([
       loadImage(backdropUrl),
       loadImage(shadowedSubjectUrl),
       loadImage(cleanSubjectUrl)
     ]);
 
-    console.log('🎨 [Compositing V2] Rendering without Auto-Lift');
+    // 2. Validate backdrop dimensions - NO fallback to subject dimensions
+    // This ensures user-controlled positioning without automatic padding
+    if (!backdropImg.naturalWidth || !backdropImg.naturalHeight || 
+        backdropImg.naturalWidth < 1 || backdropImg.naturalHeight < 1) {
+      throw new Error('Backdrop image failed to load or has invalid dimensions. Cannot composite without valid backdrop.');
+    }
+
+    // 3. Calculate canvas dimensions based on backdrop and aspect ratio
+    // Canvas size is determined by backdrop - NO automatic padding or scaling
+    let canvasW: number;
+    let canvasH: number;
+    
+    if (aspectRatio === 'original' && numericAspectRatio) {
+      // Use backdrop's natural dimensions for "original" mode
+      canvasW = backdropImg.naturalWidth;
+      canvasH = backdropImg.naturalHeight;
+    } else {
+      // Use target aspect ratio with backdrop width as base
+      let targetRatio: number;
+      if (aspectRatio === '1:1') targetRatio = 1;
+      else if (aspectRatio === '4:3') targetRatio = 4 / 3;
+      else if (aspectRatio === '3:4') targetRatio = 3 / 4;
+      else targetRatio = backdropImg.naturalWidth / backdropImg.naturalHeight;
+      
+      canvasW = backdropImg.naturalWidth;
+      canvasH = canvasW / targetRatio;
+    }
+
+    // 3. Compute layout with canvas dimensions (no auto-padding)
+    const layout = computeCompositeLayout(
+      canvasW,
+      canvasH,
+      shadowedSubjectWidth,
+      shadowedSubjectHeight,
+      cleanSubjectWidth,
+      cleanSubjectHeight,
+      placement
+    );
+
+    // 4. Create canvas with calculated dimensions
+    const canvas = document.createElement('canvas');
+    canvas.width = layout.canvasWidth;
+    canvas.height = layout.canvasHeight;
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) {
+      console.error('Failed to get canvas context');
+      return null;
+    }
+
+    console.log('🎨 [Compositing V2] Rendering without Auto-Lift', { blurBackground });
 
     // --- REMOVED AUTO-LIFT LOGIC ---
     // We strictly respect the user's placement variable.
@@ -366,8 +352,26 @@ export async function compositeLayersV2(
     const shadowY = layout.shadowedSubjectRect.y;
     const productY = layout.productRect.y;
 
-    // 4. Draw Backdrop (Bottom Layer)
-    ctx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
+    // 4. Draw Backdrop (Bottom Layer) - with optional blur
+    if (blurBackground) {
+      // Create temporary canvas for blurred backdrop
+      const blurCanvas = document.createElement('canvas');
+      try {
+        blurCanvas.width = layout.canvasWidth;
+        blurCanvas.height = layout.canvasHeight;
+        const blurCtx = blurCanvas.getContext('2d');
+        if (blurCtx) {
+          blurCtx.filter = 'blur(8px)';
+          blurCtx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
+          ctx.drawImage(blurCanvas, 0, 0);
+        }
+      } finally {
+        // Always clean up blur canvas to prevent memory leaks
+        cleanupCanvas(blurCanvas);
+      }
+    } else {
+      ctx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
+    }
 
     // 5. Draw Shadow (Middle Layer 1)
     ctx.drawImage(
@@ -442,12 +446,12 @@ export async function compositeLayersV2(
       canvas.toBlob(resolve, 'image/png');
     });
     
+    // Clean up main canvas after export
+    cleanupCanvas(canvas);
+    
     return blob;
   } catch (error) {
     console.error('Error during canvas compositing V2:', error);
     return null;
-  } finally {
-    // Clean up canvas to free memory
-    cleanupCanvas(canvas);
   }
 }
