@@ -71,6 +71,16 @@ Preferred communication style: Simple, everyday language.
 - **ETA Progress Tracking**: Added estimated time remaining display to BatchProcessingStep with dynamic calculation based on elapsed time and progress percentage.
 - **API Cleanup**: Removed commented-out deprecated endpoints from api-client.ts and routes.ts (old synchronous background removal, TinyPNG compression).
 
+### Liquid Glass iOS 26 Design System (November 2025)
+- **New Color Palette**: Updated primary colors to indigo 600 (#4f46e5) and violet 600 (#7c3aed) for modern iOS 26-inspired aesthetic. Updated HSL variables in index.css for both light and dark themes.
+- **Glass Morphism Effects**: Implemented glass-surface utilities with backdrop-filter: blur(24px), semi-transparent backgrounds (rgba/hsla with 0.6-0.8 opacity), and subtle borders for frosted glass appearance.
+- **Reusable CSS Utilities**: Created `.section-glass`, `.btn-gradient`, `.bg-gradient-electric`, `.glass-surface`, and `.text-gradient` utility classes for consistent glass-style components.
+- **Gradient Hero Sections**: Hero section on homepage features soft gradient background (indigo-50/10 to violet-50/10) with prominent gradient text for "Studio-Quality Images" headline.
+- **Pill-Shaped Buttons**: Navigation and primary action buttons use rounded-full or rounded-xl styling with gradient backgrounds for modern pill appearance.
+- **Frosted Glass Navigation**: Navbar uses backdrop-filter blur with semi-transparent background, matching iOS 26 navigation bar aesthetic.
+- **Settings & Library Redesign**: Modernized Settings and Library pages with glass card styling, icon-prefixed headers, and consistent section-glass containers.
+- **Simplified Positioning Logic**: Removed `getBottomPadding()` function and `BOTTOM_PADDING_RATIO` from canvas-utils.ts for simplified, user-controlled product positioning without automatic padding manipulation.
+
 ## External Dependencies
 
 ### AI & Image Processing Services

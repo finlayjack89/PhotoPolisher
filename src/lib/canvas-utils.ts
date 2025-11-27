@@ -17,48 +17,6 @@ export function cleanupCanvas(canvas: HTMLCanvasElement): void {
   canvas.height = 0;
 }
 
-/**
- * Scans the bottom of an image to detect transparent padding.
- * Returns the number of empty pixels at the bottom.
- * This is used to close gaps between products and reflections.
- * 
- * @param img - The image to scan
- * @returns Number of transparent pixels at the bottom
- */
-function getBottomPadding(img: HTMLImageElement): number {
-  const canvas = document.createElement('canvas');
-  // Limit size for performance - we only need vertical resolution
-  canvas.width = 100;
-  canvas.height = img.naturalHeight;
-  const ctx = canvas.getContext('2d');
-  
-  if (!ctx) return 0;
-  
-  try {
-    // Draw resized to width 100, but keep full height to measure padding accurately
-    ctx.drawImage(img, 0, 0, 100, canvas.height);
-    
-    const width = canvas.width;
-    const height = canvas.height;
-    const imgData = ctx.getImageData(0, 0, width, height);
-    const data = imgData.data;
-    
-    // Scan from bottom up
-    for (let y = height - 1; y >= 0; y--) {
-      for (let x = 0; x < width; x++) {
-        const alpha = data[(y * width + x) * 4 + 3];
-        if (alpha > 10) { // Threshold to ignore compression artifacts
-          // Found the first visible pixel from bottom
-          return height - 1 - y;
-        }
-      }
-    }
-    
-    return 0; // Image is completely empty or full height
-  } finally {
-    cleanupCanvas(canvas);
-  }
-}
 
 /**
  * Generates a lightweight "Contact Shadow" (Ambient Occlusion) for grounding.
@@ -212,31 +170,20 @@ export function computeCompositeLayout(
   const drawWidth = subjectShadowW * scale;
   const drawHeight = subjectShadowH * scale;
   const subjectX = canvasW * placement.x - drawWidth / 2;
-  const subjectY = canvasH * placement.y - drawHeight; // y represents bottom alignment (FIX: use canvasH not canvasW)
+  const subjectY = canvasH * placement.y - drawHeight; // y represents bottom alignment
 
   // 6. Calculate actual product (clean image) position within shadowed subject
-  // Cloudinary c_lpad centers the product horizontally, but the drop shadow effect
-  // causes asymmetric vertical padding (more at bottom due to shadow extending down)
-  // 
-  // The shadow extends downward, so approximately 80% of vertical padding is at 
-  // the bottom and only 20% at the top. We must account for this asymmetry.
-  const totalVerticalPadding = (subjectShadowH - subjectCleanH) * scale;
-  const BOTTOM_PADDING_RATIO = 0.8; // 80% of padding is at bottom (shadow extends down)
-  const TOP_PADDING_RATIO = 1 - BOTTOM_PADDING_RATIO; // 20% of padding is at top
-  
-  const offsetX = ((subjectShadowW - subjectCleanW) / 2) * scale; // Horizontal is centered
-  const offsetY = totalVerticalPadding * TOP_PADDING_RATIO; // Vertical uses actual top padding
+  // Cloudinary c_lpad centers the product both horizontally and vertically
+  const offsetX = ((subjectShadowW - subjectCleanW) / 2) * scale;
+  const offsetY = ((subjectShadowH - subjectCleanH) / 2) * scale;
   const productX = subjectX + offsetX;
   const productY = subjectY + offsetY;
   const productWidth = subjectCleanW * scale;
   const productHeight = subjectCleanH * scale;
 
   // 7. Calculate reflection position (directly below product)
-  // Use the same asymmetric padding calculation for consistency
-  const bottomPaddingOffset = totalVerticalPadding * BOTTOM_PADDING_RATIO;
-  
   const reflectionX = productX;
-  const reflectionY = productY + productHeight - bottomPaddingOffset;
+  const reflectionY = productY + productHeight;
   const reflectionWidth = productWidth;
   const reflectionHeight = productHeight;
 
@@ -433,21 +380,9 @@ export async function compositeLayersV2(
 
     // 6. Draw Reflection (Middle Layer 2) - MUST be before Product
     if (reflectionOptions && reflectionOptions.opacity > 0) {
-      // SMART GAP FIX:
-      // 1. Measure empty space at bottom of image
-      const rawPadding = getBottomPadding(cleanSubjectImg);
-      
-      // 2. Scale padding to current draw size
-      const scaleFactor = layout.productRect.height / cleanSubjectImg.naturalHeight;
-      const visualPadding = rawPadding * scaleFactor;
-
-      console.log(`📏 [Smart Gap] Raw Padding: ${rawPadding}px, Scaled: ${visualPadding.toFixed(2)}px`);
-
-      // 3. Calculate Overlap
-      // Formula: y + height - (2 * padding) - overlap
-      // We subtract padding TWICE: once for subject's empty bottom, once for reflection's empty top.
+      // Simple reflection positioning: directly below the product with small overlap
       const GAP_OVERLAP = 2;
-      const reflectionY = productY + layout.productRect.height - (visualPadding * 2) - GAP_OVERLAP;
+      const reflectionY = productY + layout.productRect.height - GAP_OVERLAP;
       const reflectionHeight = Math.round(layout.productRect.height * 0.6);
 
       const adjustedReflectionRect = {

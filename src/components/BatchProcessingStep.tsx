@@ -8,7 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, ArrowLeft, CheckCircle, AlertCircle, Wand2, RefreshCw, Upload, Minimize2, Moon, Clock } from "lucide-react";
+import { Loader2, ArrowLeft, CheckCircle, AlertCircle, Wand2, RefreshCw, Upload, Moon, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api-client";
 import { 
@@ -85,7 +85,7 @@ interface Job {
 // Per-image progress tracking
 export interface ImageProgress {
   fileName: string;
-  status: 'pending' | 'uploading' | 'compressing' | 'shadowing' | 'compositing' | 'complete' | 'error';
+  status: 'pending' | 'uploading' | 'shadowing' | 'compositing' | 'complete' | 'error';
   currentStep?: string;
   error?: string;
 }
@@ -342,11 +342,6 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
             
             // Brief delay to show uploading status
             await new Promise(resolve => setTimeout(resolve, 100));
-            
-            // Then update to compressing
-            batch.forEach(img => {
-              updateImageProgress(img.name, 'compressing', 'Preparing for shadow generation...');
-            });
             
             setCurrentStep(`Processing batch ${batchNumber} of ${batches.length} (${batchImages} images)...`);
             
@@ -618,8 +613,8 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
           // Brief delay to show uploading status
           await new Promise(resolve => setTimeout(resolve, 100));
           
-          // Then set compressing (server will compress before shadowing)
-          updateImageProgress(name, 'compressing', 'Compressing image...');
+          // Set shadowing status as job is being created
+          updateImageProgress(name, 'shadowing', 'Starting shadow generation...');
           
           const { jobId } = await api.processImage(cleanCutoutData, {
             shadow: shadowOptions,
@@ -694,7 +689,7 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
           } else if (statusResult.status === 'processing') {
             updateImageProgress(job.name, 'shadowing', 'Processing shadow...');
           } else if (statusResult.status === 'pending') {
-            updateImageProgress(job.name, 'compressing', 'Waiting in queue...');
+            updateImageProgress(job.name, 'shadowing', 'Waiting in queue...');
           } else if (statusResult.status === 'failed') {
             job.error_message = statusResult.error_message;
             updateImageProgress(job.name, 'error', undefined, job.error_message || 'Shadow processing failed');
@@ -957,10 +952,9 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
                         'error': 0,
                         'compositing': 1,
                         'shadowing': 2,
-                        'compressing': 3,
-                        'uploading': 4,
-                        'pending': 5,
-                        'complete': 6
+                        'uploading': 3,
+                        'pending': 4,
+                        'complete': 5
                       };
                       return (statusOrder[a.status] || 99) - (statusOrder[b.status] || 99);
                     })
@@ -980,10 +974,6 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
                         bgClass = 'bg-destructive/10';
                       } else if (progress.status === 'uploading') {
                         icon = <Upload className="h-4 w-4 shrink-0 animate-pulse" />;
-                        colorClass = 'text-blue-600 dark:text-blue-400';
-                        bgClass = 'bg-blue-50 dark:bg-blue-950/20';
-                      } else if (progress.status === 'compressing') {
-                        icon = <Minimize2 className="h-4 w-4 shrink-0 animate-pulse" />;
                         colorClass = 'text-blue-600 dark:text-blue-400';
                         bgClass = 'bg-blue-50 dark:bg-blue-950/20';
                       } else if (progress.status === 'shadowing') {

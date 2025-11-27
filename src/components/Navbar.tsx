@@ -12,29 +12,31 @@ export const Navbar = () => {
   const isActive = (path: string) => location.pathname === path;
 
   return (
-    <header className="border-b border-border/50 bg-card/50 backdrop-blur-sm sticky top-0 z-50" data-testid="navbar">
-      <div className="container mx-auto px-6 py-4 flex items-center justify-between">
+    <header className="nav-glass sticky top-0 z-50" data-testid="navbar">
+      <div className="container mx-auto px-6 py-3 flex items-center justify-between">
         <div 
-          className="flex items-center space-x-3 cursor-pointer hover:opacity-80 transition-opacity"
+          className="flex items-center space-x-3 cursor-pointer group"
           onClick={() => navigate("/")}
           data-testid="link-home-logo"
         >
-          <div className="w-8 h-8 bg-gradient-electric rounded-lg flex items-center justify-center">
-            <Sparkles className="w-5 h-5 text-electric-foreground" />
+          <div className="w-9 h-9 bg-gradient-electric rounded-xl flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
+            <Sparkles className="w-5 h-5 text-white" />
           </div>
-          <h1 className="text-xl font-bold text-foreground">LuxSnap</h1>
+          <h1 className="text-xl font-bold text-foreground tracking-tight">LuxSnap</h1>
         </div>
         
-        <nav className="flex items-center space-x-2">
+        <nav className="flex items-center space-x-1">
           {user && (
             <>
               <Button 
-                variant={isActive("/") ? "secondary" : "ghost"}
+                variant="ghost"
                 size="sm" 
                 onClick={() => navigate("/")}
                 className={cn(
-                  "transition-colors",
-                  isActive("/") && "bg-secondary"
+                  "rounded-xl px-4 transition-all duration-200",
+                  isActive("/") 
+                    ? "bg-primary/10 text-primary font-medium" 
+                    : "hover:bg-accent/80"
                 )}
                 data-testid="link-home"
               >
@@ -42,12 +44,14 @@ export const Navbar = () => {
                 Home
               </Button>
               <Button 
-                variant={isActive("/library") ? "secondary" : "ghost"}
+                variant="ghost"
                 size="sm" 
                 onClick={() => navigate("/library")}
                 className={cn(
-                  "transition-colors",
-                  isActive("/library") && "bg-secondary"
+                  "rounded-xl px-4 transition-all duration-200",
+                  isActive("/library") 
+                    ? "bg-primary/10 text-primary font-medium" 
+                    : "hover:bg-accent/80"
                 )}
                 data-testid="link-library"
               >
@@ -55,12 +59,14 @@ export const Navbar = () => {
                 Library
               </Button>
               <Button 
-                variant={isActive("/settings") ? "secondary" : "ghost"}
+                variant="ghost"
                 size="sm" 
                 onClick={() => navigate("/settings")}
                 className={cn(
-                  "transition-colors",
-                  isActive("/settings") && "bg-secondary"
+                  "rounded-xl px-4 transition-all duration-200",
+                  isActive("/settings") 
+                    ? "bg-primary/10 text-primary font-medium" 
+                    : "hover:bg-accent/80"
                 )}
                 data-testid="link-settings"
               >
@@ -70,24 +76,26 @@ export const Navbar = () => {
             </>
           )}
           
-          <div className="h-6 w-px bg-border/50 mx-2" />
+          <div className="h-6 w-px bg-border/30 mx-3" />
           
           {user ? (
             <Button 
               variant="ghost" 
               size="sm" 
               onClick={signOut}
+              className="rounded-xl px-4 hover:bg-destructive/10 hover:text-destructive transition-all duration-200"
               data-testid="button-signout"
             >
               <LogOut className="h-4 w-4 mr-2" />
               Sign Out
             </Button>
           ) : (
-            <>
+            <div className="flex items-center gap-2">
               <Button 
                 variant="ghost" 
                 size="sm" 
                 onClick={() => navigate("/auth")}
+                className="rounded-xl px-4 hover:bg-accent/80 transition-all duration-200"
                 data-testid="button-signin"
               >
                 <LogIn className="h-4 w-4 mr-2" />
@@ -95,14 +103,14 @@ export const Navbar = () => {
               </Button>
               <Button 
                 size="sm"
-                className="bg-gradient-electric text-electric-foreground hover:opacity-90"
+                className="btn-gradient rounded-xl shadow-md"
                 onClick={() => navigate("/auth")}
                 data-testid="button-signup"
               >
                 <UserPlus className="h-4 w-4 mr-2" />
-                Sign Up
+                Get Started
               </Button>
-            </>
+            </div>
           )}
         </nav>
       </div>

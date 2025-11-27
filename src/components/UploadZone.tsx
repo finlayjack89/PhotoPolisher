@@ -283,125 +283,143 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onFilesUploaded }) => {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8 p-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-2xl font-bold text-center">Upload Product Images</CardTitle>
-          <p className="text-center text-muted-foreground">
-            Upload your product photos to get started. Supports PNG, JPG, HEIC, and RAW formats.
-          </p>
-        </CardHeader>
-        <CardContent>
-          <div
-            {...getRootProps()}
-            className={`border-2 border-dashed rounded-lg p-12 text-center cursor-pointer transition-colors ${
-              isDragActive 
-                ? 'border-primary bg-primary/5' 
-                : 'border-muted-foreground/25 hover:border-primary/50'
-            }`}
-          >
-            <input {...getInputProps()} />
-            <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-            {isDragActive ? (
-              <p className="text-lg">Drop the files here...</p>
-            ) : (
-              <>
-                <p className="text-lg mb-2">Drag & drop images here, or click to select</p>
-                <p className="text-sm text-muted-foreground">
-                  Supports: PNG, JPG, WEBP, HEIC, CR2, NEF, ARW • Max 50MB per file • Up to 20 files
-                </p>
-              </>
+    <div className="space-y-6">
+      {/* Upload dropzone */}
+      <div
+        {...getRootProps()}
+        className={`relative border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all duration-300 ${
+          isDragActive 
+            ? 'border-electric bg-electric/5 scale-[1.02]' 
+            : 'border-border hover:border-electric/50 hover:bg-accent/30'
+        }`}
+      >
+        <input {...getInputProps()} />
+        <div className={`mx-auto w-16 h-16 rounded-2xl flex items-center justify-center mb-4 transition-all duration-300 ${
+          isDragActive 
+            ? 'bg-gradient-electric text-white scale-110' 
+            : 'bg-secondary text-muted-foreground'
+        }`}>
+          <Upload className="h-8 w-8" />
+        </div>
+        {isDragActive ? (
+          <p className="text-lg font-medium text-electric">Drop your files here...</p>
+        ) : (
+          <>
+            <p className="text-lg font-medium text-foreground mb-2">
+              Drag & drop images here
+            </p>
+            <p className="text-sm text-muted-foreground mb-4">
+              or click to browse your files
+            </p>
+            <div className="flex flex-wrap justify-center gap-2 text-xs text-muted-foreground">
+              <span className="px-2 py-1 rounded-full bg-secondary">PNG</span>
+              <span className="px-2 py-1 rounded-full bg-secondary">JPG</span>
+              <span className="px-2 py-1 rounded-full bg-secondary">HEIC</span>
+              <span className="px-2 py-1 rounded-full bg-secondary">RAW</span>
+              <span className="text-muted-foreground/60">• Max 40MB • Up to 20 files</span>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Selected files preview */}
+      {selectedFiles.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-foreground">
+              Selected Files 
+              <span className="text-muted-foreground font-normal ml-2">
+                ({selectedFiles.length}/20)
+              </span>
+            </h3>
+            {selectedFiles.some(f => f.isPreCut) && (
+              <span className="text-xs text-electric bg-electric/10 px-3 py-1 rounded-full">
+                {selectedFiles.filter(f => f.isPreCut).length} pre-cut
+              </span>
             )}
           </div>
-        </CardContent>
-      </Card>
-
-      {selectedFiles.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Selected Files ({selectedFiles.length}/20)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-              {selectedFiles.map((file, index) => (
-                <div key={index} className="relative border rounded-lg p-4">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeFile(index)}
-                    className="absolute top-2 right-2 h-6 w-6 p-0 hover:bg-destructive/10"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                  
-                  {previews[index] && (
+          
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+            {selectedFiles.map((file, index) => (
+              <div 
+                key={index} 
+                className="group relative rounded-xl border border-border bg-card overflow-hidden hover:border-electric/30 transition-colors"
+              >
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => removeFile(index)}
+                  className="absolute top-2 right-2 h-7 w-7 p-0 bg-background/80 backdrop-blur-sm rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10 hover:bg-destructive hover:text-destructive-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+                
+                {previews[index] && (
+                  <div className="aspect-square bg-checkered">
                     <img 
                       src={previews[index]} 
                       alt={file.name}
-                      className="w-full h-32 object-cover rounded mb-2"
+                      className="w-full h-full object-contain"
                     />
-                  )}
-                  
-                   <div className="space-y-2">
-                     <p className="text-sm font-medium truncate">{file.name}</p>
-                     <div className="text-xs text-muted-foreground">
-                       Original: {((file.originalSize || file.size) / (1024 * 1024)).toFixed(2)}MB
-                     </div>
-                     <div className="text-xs text-green-600">
-                       Optimized: {(file.size / (1024 * 1024)).toFixed(2)}MB
-                     </div>
-                     <div className="text-xs text-muted-foreground">
-                       {file.type}
-                     </div>
-                     
-                     {/* Pre-cut toggle */}
-                     <div className="flex items-center space-x-2 pt-1">
-                       <Checkbox
-                         id={`precut-${index}`}
-                         checked={file.isPreCut || false}
-                         onCheckedChange={() => togglePreCut(index)}
-                       />
-                       <label 
-                         htmlFor={`precut-${index}`} 
-                         className="text-xs text-muted-foreground cursor-pointer flex items-center space-x-1"
-                       >
-                         <Scissors className="h-3 w-3" />
-                         <span>Background already removed</span>
-                       </label>
-                     </div>
-                   </div>
-                </div>
-              ))}
-            </div>
-            
-            <div className="flex justify-between items-center">
-              <div className="space-y-1">
-                <p className="text-sm text-muted-foreground">
-                  All images are automatically optimized to 2048px max and under 5MB
-                </p>
-                {selectedFiles.some(f => f.isPreCut) && (
-                  <p className="text-sm text-electric">
-                    {selectedFiles.filter(f => f.isPreCut).length} image(s) marked as pre-cut - will skip background removal
-                  </p>
+                  </div>
                 )}
+                
+                <div className="p-3 space-y-2 border-t border-border">
+                  <p className="text-xs font-medium truncate text-foreground">{file.name}</p>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">
+                      {(file.size / (1024 * 1024)).toFixed(1)}MB
+                    </span>
+                    {file.isPreCut && (
+                      <span className="text-electric flex items-center gap-1">
+                        <Scissors className="h-3 w-3" />
+                        Pre-cut
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div 
+                    className="flex items-center gap-2 pt-1 cursor-pointer"
+                    onClick={() => togglePreCut(index)}
+                  >
+                    <Checkbox
+                      id={`precut-${index}`}
+                      checked={file.isPreCut || false}
+                      onCheckedChange={() => togglePreCut(index)}
+                      className="h-3.5 w-3.5"
+                    />
+                    <label 
+                      htmlFor={`precut-${index}`} 
+                      className="text-xs text-muted-foreground cursor-pointer"
+                    >
+                      No background
+                    </label>
+                  </div>
+                </div>
               </div>
-              <Button 
-                onClick={() => onFilesUploaded(selectedFiles)}
-                disabled={selectedFiles.length === 0}
-                className="min-w-[150px]"
-              >
-                <FileImage className="mr-2 h-4 w-4" />
-                Start Processing ({selectedFiles.length})
-              </Button>
-            </div>
-            
-            {selectedFiles.length >= 20 && (
-              <p className="text-sm text-amber-600 mt-4">
-                Maximum of 20 files reached. Remove some files to add more.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+            ))}
+          </div>
+          
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-4 border-t border-border">
+            <p className="text-sm text-muted-foreground">
+              Images auto-optimized for best results
+            </p>
+            <Button 
+              onClick={() => onFilesUploaded(selectedFiles)}
+              disabled={selectedFiles.length === 0}
+              className="btn-gradient w-full sm:w-auto"
+            >
+              <FileImage className="mr-2 h-4 w-4" />
+              Start Processing ({selectedFiles.length})
+            </Button>
+          </div>
+          
+          {selectedFiles.length >= 20 && (
+            <p className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-950/20 px-4 py-2 rounded-lg">
+              Maximum of 20 files reached. Remove some to add more.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

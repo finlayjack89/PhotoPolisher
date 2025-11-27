@@ -1,12 +1,11 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BackdropUpload } from "@/components/BackdropUpload";
 import { BackdropLibrary } from "@/components/BackdropLibrary";
-import { Button } from "@/components/ui/button";
-import { ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { Loader2, Image as ImageIcon, Settings as SettingsIcon } from "lucide-react";
 
 const Settings = () => {
   const navigate = useNavigate();
@@ -21,9 +20,9 @@ const Settings = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-electric mx-auto mb-4"></div>
+          <Loader2 className="h-8 w-8 animate-spin text-electric mx-auto mb-4" />
           <p className="text-muted-foreground">Loading...</p>
         </div>
       </div>
@@ -39,73 +38,83 @@ const Settings = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container mx-auto p-6">
-        <div className="mb-6">
-          <Button 
-            variant="outline" 
-            onClick={() => navigate("/")}
-            className="mb-4"
-          >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Home
-          </Button>
-          
-          <h1 className="text-3xl font-bold">Settings</h1>
-          <p className="text-muted-foreground">
-            Manage your backdrop library and application preferences
-          </p>
+    <div className="min-h-[calc(100vh-4rem)]">
+      <div className="container mx-auto px-6 py-8">
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 rounded-xl bg-gradient-electric flex items-center justify-center">
+              <SettingsIcon className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">Settings</h1>
+              <p className="text-sm text-muted-foreground">
+                Manage your backdrop library and preferences
+              </p>
+            </div>
+          </div>
         </div>
 
         <Tabs defaultValue="backdrops" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="backdrops">Backdrop Library</TabsTrigger>
-            <TabsTrigger value="general">General Settings</TabsTrigger>
+          <TabsList className="grid w-full max-w-md grid-cols-2 p-1 bg-secondary/50 rounded-xl">
+            <TabsTrigger 
+              value="backdrops" 
+              className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
+            >
+              <ImageIcon className="w-4 h-4 mr-2" />
+              Backdrops
+            </TabsTrigger>
+            <TabsTrigger 
+              value="general"
+              className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
+            >
+              <SettingsIcon className="w-4 h-4 mr-2" />
+              General
+            </TabsTrigger>
           </TabsList>
           
-          <TabsContent value="backdrops" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Upload New Backdrop</CardTitle>
-                <CardDescription>
-                  Add high-quality backdrops to your library. Images will be optimized for AI processing while maintaining maximum quality.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <BackdropUpload onUploadComplete={handleBackdropUploaded} />
-              </CardContent>
-            </Card>
+          <TabsContent value="backdrops" className="space-y-6 mt-6">
+            <div className="section-glass p-6">
+              <div className="mb-4">
+                <h2 className="text-lg font-semibold text-foreground">Upload New Backdrop</h2>
+                <p className="text-sm text-muted-foreground">
+                  Add high-quality backdrops to your library
+                </p>
+              </div>
+              <BackdropUpload onUploadComplete={handleBackdropUploaded} />
+            </div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Your Backdrop Library</CardTitle>
-                <CardDescription>
-                  Manage your saved backdrops. You can delete backdrops you no longer need.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <BackdropLibrary 
-                  refreshTrigger={refreshLibrary} 
-                  allowDelete={true}
-                />
-              </CardContent>
-            </Card>
+            <div className="section-glass p-6">
+              <div className="mb-4">
+                <h2 className="text-lg font-semibold text-foreground">Your Library</h2>
+                <p className="text-sm text-muted-foreground">
+                  Manage your saved backdrops
+                </p>
+              </div>
+              <BackdropLibrary 
+                refreshTrigger={refreshLibrary} 
+                allowDelete={true}
+              />
+            </div>
           </TabsContent>
           
-          <TabsContent value="general">
-            <Card>
-              <CardHeader>
-                <CardTitle>General Settings</CardTitle>
-                <CardDescription>
+          <TabsContent value="general" className="mt-6">
+            <div className="section-glass p-6">
+              <div className="mb-4">
+                <h2 className="text-lg font-semibold text-foreground">General Settings</h2>
+                <p className="text-sm text-muted-foreground">
                   Application preferences and account settings
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground">
-                  Additional settings will be available here in future updates.
                 </p>
-              </CardContent>
-            </Card>
+              </div>
+              <div className="py-8 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-secondary mx-auto mb-4 flex items-center justify-center">
+                  <SettingsIcon className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <p className="text-muted-foreground">
+                  Additional settings coming soon
+                </p>
+              </div>
+            </div>
           </TabsContent>
         </Tabs>
       </div>
