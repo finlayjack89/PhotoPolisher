@@ -47,35 +47,6 @@ export async function apiRequest<T = any>(
 }
 
 export const api = {
-  // DEPRECATED: Old synchronous background removal endpoints (Nov 14, 2025)
-  // These call /api/remove-backgrounds which blocks Node.js event loop
-  // Replaced with job-based API: createBackgroundRemovalJob + polling
-  /*
-  removeBackgrounds: (data: any) => apiRequest('/api/remove-backgrounds', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
-
-  removeBackground: async (file: File): Promise<{ success: boolean; images: Array<{ name: string; transparentData: string; size: number; error?: string }> }> => {
-    const base64Data = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-
-    return apiRequest('/api/remove-backgrounds', {
-      method: 'POST',
-      body: JSON.stringify({
-        images: [{
-          data: base64Data,
-          name: file.name,
-        }],
-      }),
-    });
-  },
-  */
-
   addDropShadow: (data: any) => apiRequest('/api/add-drop-shadow', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -111,15 +82,6 @@ export const api = {
       method: 'GET',
     });
   },
-
-  // --- Other endpoints ---
-
-  // COMMENTED OUT: TinyPNG compression (Phase 1 stabilization)
-  // Client-side compression already handles this
-  // compressImages: (data: any) => apiRequest('/api/compress-images', {
-  //   method: 'POST',
-  //   body: JSON.stringify(data),
-  // }),
 
   analyzeImages: (data: any) => apiRequest('/api/analyze-images', {
     method: 'POST',

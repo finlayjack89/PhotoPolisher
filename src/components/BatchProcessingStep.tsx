@@ -144,10 +144,19 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [processedSubjects, setProcessedSubjects] = useState<Subject[]>(subjects as Subject[]);
   const [imageProgress, setImageProgress] = useState<Map<string, ImageProgress>>(new Map());
+  const [processingStartTime, setProcessingStartTime] = useState<number | null>(null);
+  const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState<string | null>(null);
   const { toast } = useToast();
   const { state, isShadowStale, markShadowsGenerated } = useWorkflow();
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const isCancelled = useRef(false);
+  
+  const formatTimeRemaining = (seconds: number): string => {
+    if (seconds < 60) return `${Math.ceil(seconds)}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.ceil(seconds % 60);
+    return `${minutes}m ${remainingSeconds}s`;
+  };
 
   // Helper function to update individual image progress
   const updateImageProgress = (fileName: string, status: ImageProgress['status'], currentStep?: string, error?: string) => {
@@ -191,6 +200,22 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
       }
     };
   }, []);
+  
+  useEffect(() => {
+    if (!processingStartTime || progress <= 0 || progress >= 100) {
+      setEstimatedTimeRemaining(null);
+      return;
+    }
+    
+    const elapsed = (Date.now() - processingStartTime) / 1000;
+    const progressFraction = progress / 100;
+    
+    if (progressFraction > 0.05) {
+      const totalEstimated = elapsed / progressFraction;
+      const remaining = totalEstimated - elapsed;
+      setEstimatedTimeRemaining(formatTimeRemaining(Math.max(0, remaining)));
+    }
+  }, [progress, processingStartTime]);
 
   const handleRegenerateShadows = async () => {
     setIsRegenerating(true);
@@ -513,6 +538,7 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
 
   const startBatchProcessing = async () => {
     setCurrentStep(`Starting ${processedSubjects.length} processing jobs...`);
+    setProcessingStartTime(Date.now());
     const newJobs: Job[] = [];
 
     // Use shadow options from masterRules if they exist,
@@ -895,7 +921,14 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
           <div className="space-y-4">
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground" data-testid="text-current-step">{currentStep}</span>
-              <span className="font-medium" data-testid="text-progress-percent">{Math.round(progress)}%</span>
+              <div className="flex items-center gap-3">
+                {estimatedTimeRemaining && (
+                  <span className="text-xs text-muted-foreground" data-testid="text-eta">
+                    ~{estimatedTimeRemaining} remaining
+                  </span>
+                )}
+                <span className="font-medium" data-testid="text-progress-percent">{Math.round(progress)}%</span>
+              </div>
             </div>
             <Progress value={progress} className="h-2" data-testid="progress-batch" />
           </div>
