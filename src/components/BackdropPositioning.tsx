@@ -92,6 +92,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
 
   const [subjectDimensions, setSubjectDimensions] = useState({ w: 1, h: 1 });
   const [backdropDimensions, setBackdropDimensions] = useState({ w: 1, h: 1 });
+  const [hasAutoScaled, setHasAutoScaled] = useState(false);
 
   // Shadow customization state
   const [isShadowPanelOpen, setIsShadowPanelOpen] = useState(false);
@@ -168,6 +169,46 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
       });
     }
   }, [backdrop]);
+
+  // Track previous dimensions to detect changes
+  const prevBackdropWidthRef = useRef<number>(0);
+  const prevSubjectWidthRef = useRef<number>(0);
+
+  // Auto-calculate scale so subject fills 80% of backdrop width
+  // Runs when backdrop or subject dimensions change
+  useEffect(() => {
+    if (backdropDimensions.w <= 1 || subjectDimensions.w <= 1) return;
+    
+    // Check if dimensions have changed (new backdrop or subject)
+    const backdropChanged = prevBackdropWidthRef.current !== backdropDimensions.w;
+    const subjectChanged = prevSubjectWidthRef.current !== subjectDimensions.w;
+    
+    // If neither changed and we've already scaled, skip
+    if (!backdropChanged && !subjectChanged && hasAutoScaled) return;
+    
+    // Calculate optimal scale: subject width should be 80% of backdrop width
+    const targetWidth = backdropDimensions.w * 0.8;
+    const optimalScale = targetWidth / subjectDimensions.w;
+    
+    // Clamp scale to reasonable range (0.5x to 2.0x)
+    const clampedScale = Math.max(0.5, Math.min(2.0, optimalScale));
+    
+    console.log('📏 [Auto-Scale] Calculating optimal scale:', {
+      backdropWidth: backdropDimensions.w,
+      subjectWidth: subjectDimensions.w,
+      targetWidth,
+      optimalScale,
+      clampedScale,
+      reason: backdropChanged ? 'backdrop changed' : (subjectChanged ? 'subject changed' : 'initial')
+    });
+    
+    setPlacement(prev => ({ ...prev, scale: clampedScale }));
+    setHasAutoScaled(true);
+    
+    // Update refs
+    prevBackdropWidthRef.current = backdropDimensions.w;
+    prevSubjectWidthRef.current = subjectDimensions.w;
+  }, [backdropDimensions.w, subjectDimensions.w, hasAutoScaled]);
 
   // Upload preview to Cloudinary when preview cutout is ready
   useEffect(() => {
@@ -290,14 +331,41 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     const subjectScale = placement.scale || 1.0;
     
     return {
+      // Container just sets the aspect ratio, no background
+      containerStyles: {
+        aspectRatio: aspectRatio,
+      },
+      // Backdrop layer - absolute positioned, applies blur ONLY here
+      // Depth-of-field gradient: sharp at bottom, subtle blur at top
       backdropStyles: {
+        position: 'absolute' as const,
+        inset: 0,
         backgroundImage: `url(${backdrop})`,
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
-        aspectRatio: aspectRatio,
-        filter: blurBackground ? 'blur(8px)' : 'none',
+        // Gradient blur mask: sharp at bottom (0%), subtle blur at top
+        // Using CSS mask with gradient for depth-of-field simulation
+        maskImage: blurBackground 
+          ? 'linear-gradient(to top, black 0%, black 30%, rgba(0,0,0,0.7) 60%, rgba(0,0,0,0.4) 100%)'
+          : 'none',
+        WebkitMaskImage: blurBackground 
+          ? 'linear-gradient(to top, black 0%, black 30%, rgba(0,0,0,0.7) 60%, rgba(0,0,0,0.4) 100%)'
+          : 'none',
+        filter: blurBackground ? 'blur(3px)' : 'none',
+        zIndex: 0,
       },
+      // Sharp backdrop layer underneath (for areas that should be sharp)
+      sharpBackdropStyles: {
+        position: 'absolute' as const,
+        inset: 0,
+        backgroundImage: `url(${backdrop})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        zIndex: -1,
+      },
+      // Subject layer - NEVER blurred, on top of backdrop
       subjectStyles: {
         // Subject renders at natural size controlled by placement.scale only
         // No artificial clamps - user has full control over positioning
@@ -309,11 +377,12 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         transformOrigin: 'center bottom',
         left: `${placement.x * 100}%`,
         top: `${placement.y * 100}%`,
+        zIndex: 10,
       }
     };
   };
   
-  const { backdropStyles, subjectStyles } = getPreviewStyles();
+  const { containerStyles, backdropStyles, sharpBackdropStyles, subjectStyles } = getPreviewStyles();
   // --- End CSS Preview Logic ---
 
   return (
@@ -518,7 +587,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                 ) : (
                   <div
                     className="relative w-full max-w-full overflow-hidden rounded-lg border-2 border-primary/50 touch-none"
-                    style={backdropStyles}
+                    style={containerStyles}
                     onMouseDown={() => setIsDragging(true)}
                     onMouseMove={(e) => {
                       if (!isDragging) return;
@@ -547,7 +616,14 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                     onTouchCancel={() => setIsDragging(false)}
                     data-testid="preview-container"
                   >
+                    {/* Sharp backdrop layer (always visible underneath) */}
+                    <div style={sharpBackdropStyles} />
+                    
+                    {/* Blurred backdrop layer (overlays with gradient mask when enabled) */}
+                    {blurBackground && <div style={backdropStyles} />}
+                    
                     {/* Main Subject - use Cloudinary shadow preview when available */}
+                    {/* This layer is NEVER blurred - rendered on top of backdrop */}
                     <div
                       className={cn(
                         "absolute cursor-grab select-none",

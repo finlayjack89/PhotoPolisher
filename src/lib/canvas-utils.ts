@@ -352,18 +352,49 @@ export async function compositeLayersV2(
     const shadowY = layout.shadowedSubjectRect.y;
     const productY = layout.productRect.y;
 
-    // 4. Draw Backdrop (Bottom Layer) - with optional blur
+    // 4. Draw Backdrop (Bottom Layer) - with optional depth-of-field blur
     if (blurBackground) {
-      // Create temporary canvas for blurred backdrop
+      // Depth-of-field gradient blur: sharp at bottom, progressively blurry at top
+      // This simulates a camera focusing on the product with background falling off
+      const numStrips = 8; // Number of horizontal strips for gradient blur
+      const stripHeight = layout.canvasHeight / numStrips;
+      const maxBlur = 4; // Maximum blur at the top (subtle, not aggressive)
+      
+      // Create temporary canvas for each blur level
       const blurCanvas = document.createElement('canvas');
       try {
         blurCanvas.width = layout.canvasWidth;
         blurCanvas.height = layout.canvasHeight;
         const blurCtx = blurCanvas.getContext('2d');
+        
         if (blurCtx) {
-          blurCtx.filter = 'blur(8px)';
-          blurCtx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
+          // Draw backdrop strips from bottom (sharp) to top (blurry)
+          for (let i = numStrips - 1; i >= 0; i--) {
+            // Calculate blur amount: 0 at bottom, maxBlur at top
+            // Bottom 30% stays sharp, then gradually increases
+            const progress = 1 - (i / numStrips); // 0 at top, 1 at bottom
+            let blurAmount = 0;
+            if (progress < 0.7) {
+              // Top 70% gets progressive blur
+              blurAmount = maxBlur * (1 - progress / 0.7);
+            }
+            // Bottom 30% stays sharp (blurAmount = 0)
+            
+            const y = i * stripHeight;
+            
+            // Clear and redraw strip with appropriate blur
+            blurCtx.filter = blurAmount > 0 ? `blur(${blurAmount}px)` : 'none';
+            blurCtx.drawImage(
+              backdropImg,
+              0, y / layout.canvasHeight * backdropImg.naturalHeight,
+              backdropImg.naturalWidth, stripHeight / layout.canvasHeight * backdropImg.naturalHeight,
+              0, y,
+              layout.canvasWidth, stripHeight + 1 // +1 to avoid gaps between strips
+            );
+          }
+          
           ctx.drawImage(blurCanvas, 0, 0);
+          console.log('🔵 [Depth-of-Field] Applied gradient blur (0px bottom → ' + maxBlur + 'px top)');
         }
       } finally {
         // Always clean up blur canvas to prevent memory leaks
