@@ -224,7 +224,8 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     setBackdropFile(file);
     
     // Set default positioning (user can manually adjust)
-    setPlacement(prev => ({ ...prev, y: 1.2 }));
+    // Use 0.85 to position near bottom but within valid range (0-1)
+    setPlacement(prev => ({ ...prev, y: 0.85 }));
     
     toast({
       title: source === 'upload' ? "Backdrop Uploaded" : "Backdrop Selected",

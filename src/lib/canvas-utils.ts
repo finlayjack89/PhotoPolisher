@@ -237,25 +237,22 @@ export function computeCompositeLayout(
   // 6. Calculate actual product (clean image) position within shadowed subject
   // Cloudinary c_lpad centers the product horizontally, but the drop shadow effect
   // causes asymmetric vertical padding (more at bottom due to shadow extending down)
-  const offsetX = ((subjectShadowW - subjectCleanW) / 2) * scale;
-  const offsetY = ((subjectShadowH - subjectCleanH) / 2) * scale;
+  // 
+  // The shadow extends downward, so approximately 80% of vertical padding is at 
+  // the bottom and only 20% at the top. We must account for this asymmetry.
+  const totalVerticalPadding = (subjectShadowH - subjectCleanH) * scale;
+  const BOTTOM_PADDING_RATIO = 0.8; // 80% of padding is at bottom (shadow extends down)
+  const TOP_PADDING_RATIO = 1 - BOTTOM_PADDING_RATIO; // 20% of padding is at top
+  
+  const offsetX = ((subjectShadowW - subjectCleanW) / 2) * scale; // Horizontal is centered
+  const offsetY = totalVerticalPadding * TOP_PADDING_RATIO; // Vertical uses actual top padding
   const productX = subjectX + offsetX;
   const productY = subjectY + offsetY;
   const productWidth = subjectCleanW * scale;
   const productHeight = subjectCleanH * scale;
 
   // 7. Calculate reflection position (directly below product)
-  // The Cloudinary shadow has asymmetric padding: the drop shadow effect extends
-  // the image downward more than upward. We need to compensate for this when 
-  // positioning the reflection to avoid a gap.
-  // 
-  // Empirical testing shows the bottom padding offset is approximately 15-20% of
-  // the total vertical padding. This may vary with shadow parameters (elevation,
-  // spread, etc.) and can be adjusted based on testing.
-  // 
-  // TODO: Make this configurable or derive from shadow parameters if needed
-  const totalVerticalPadding = (subjectShadowH - subjectCleanH) * scale;
-  const BOTTOM_PADDING_RATIO = 0.8; // Adjust this value if reflection gap persists
+  // Use the same asymmetric padding calculation for consistency
   const bottomPaddingOffset = totalVerticalPadding * BOTTOM_PADDING_RATIO;
   
   const reflectionX = productX;
@@ -431,8 +428,12 @@ export async function compositeLayers(
       try {
         console.log('🪞 [compositeLayers] Starting reflection generation');
         
-        const productOffsetX = (subjectLayer.width - cleanW) / 2;
-        const productOffsetY = (subjectLayer.height - cleanH) / 2;
+        // Calculate product offset within shadow image
+        // Cloudinary shadow extends downward, creating asymmetric padding (80% bottom, 20% top)
+        const totalVerticalPadding = subjectLayer.height - cleanH;
+        const BOTTOM_PADDING_RATIO = 0.8; // Match computeCompositeLayout
+        const productOffsetX = (subjectLayer.width - cleanW) / 2; // Horizontal is centered
+        const productOffsetY = totalVerticalPadding * (1 - BOTTOM_PADDING_RATIO); // Vertical uses actual top padding (20%)
         const actualProductX = finalX + productOffsetX;
         const actualProductY = finalY + productOffsetY;
 
