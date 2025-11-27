@@ -58,6 +58,11 @@ Preferred communication style: Simple, everyday language.
 - **Robust Error Handling**: Comprehensive logging with 🪞 [SmartReflection] and 🪞 [compositeLayers] prefixes for debugging. Validates dimensions (prevents 0-width/0-height errors), ensures minimum 1px reflection height, uses Math.floor for sub-pixel rendering prevention. Try-catch blocks allow graceful degradation—composite continues without reflection if generation fails rather than failing entire operation.
 - **Canvas Context Management**: Explicit ctx.restore() called before gradient mask application to prevent filter bleeding into subsequent operations. Proper cleanup and error logging at each step for production reliability.
 
+### Product Positioning Bug Fixes (November 2025)
+- **Fixed Invalid Initial Placement**: Changed default placement from y: 1.2 to y: 0.85 to stay within valid 0-1 range. The old value caused products to appear too low initially and "glitch" upward when dragged (due to the drag handler's Math.min(1, y) clamp).
+- **Fixed Asymmetric Shadow Padding**: Updated `computeCompositeLayout` and legacy `compositeLayers` to account for Cloudinary's asymmetric drop shadow padding. Shadows extend downward, creating 80% bottom / 20% top padding split (BOTTOM_PADDING_RATIO = 0.8). Old code assumed symmetric 50/50 centering. New calculation uses `offsetY = totalVerticalPadding * 0.2` (top padding) instead of `totalVerticalPadding / 2`.
+- **CSS Preview & Canvas Consistency**: Both CSS preview and canvas compositor now use identical positioning logic—bottom-edge alignment with the same asymmetric offset calculation. This eliminates visual discrepancy between what users see in preview versus final output.
+
 ## External Dependencies
 
 ### AI & Image Processing Services
