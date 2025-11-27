@@ -26,6 +26,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { SubjectPlacement, getImageDimensions } from "@/lib/canvas-utils";
+import { fileToDataUrl } from "@/lib/file-utils";
 import { useToast } from "@/hooks/use-toast";
 import { BackdropLibrary } from "@/components/BackdropLibrary";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -60,16 +61,6 @@ interface BackdropPositioningProps {
   ) => void;
   onBack: () => void;
 }
-
-// Helper to read File as Data URL
-const fileToDataUrl = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target?.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-};
 
 export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   allSubjects,
@@ -526,23 +517,35 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                   </div>
                 ) : (
                   <div
-                    className="relative w-full max-w-full overflow-hidden rounded-lg border-2 border-primary/50"
+                    className="relative w-full max-w-full overflow-hidden rounded-lg border-2 border-primary/50 touch-none"
                     style={backdropStyles}
-                    onMouseDown={(e) => {
-                      setIsDragging(true);
-                    }}
+                    onMouseDown={() => setIsDragging(true)}
                     onMouseMove={(e) => {
                       if (!isDragging) return;
                       const rect = e.currentTarget.getBoundingClientRect();
-                      // Only update Y, keep X centered
                       setPlacement(prev => ({
                         ...prev,
-                        x: 0.5, 
+                        x: 0.5,
                         y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height))
                       }));
                     }}
                     onMouseUp={() => setIsDragging(false)}
                     onMouseLeave={() => setIsDragging(false)}
+                    onTouchStart={() => setIsDragging(true)}
+                    onTouchMove={(e) => {
+                      if (!isDragging) return;
+                      e.preventDefault();
+                      const touch = e.touches[0];
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setPlacement(prev => ({
+                        ...prev,
+                        x: 0.5,
+                        y: Math.max(0, Math.min(1, (touch.clientY - rect.top) / rect.height))
+                      }));
+                    }}
+                    onTouchEnd={() => setIsDragging(false)}
+                    onTouchCancel={() => setIsDragging(false)}
+                    data-testid="preview-container"
                   >
                     {/* Main Subject - use Cloudinary shadow preview when available */}
                     <div

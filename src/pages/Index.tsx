@@ -1,9 +1,8 @@
 import { useState } from "react";
-import { Upload, Sparkles, Image as ImageIcon, Settings, LogOut, FolderOpen, Loader2 } from "lucide-react";
+import { Upload, Sparkles, Image as ImageIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UploadZone } from "@/components/UploadZone";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/hooks/useAuth";
 import { useWorkflow } from "@/contexts/WorkflowContext";
 import { useToast } from "@/hooks/use-toast";
 import heroImage from "@/assets/hero-studio.jpg";
@@ -11,7 +10,6 @@ import heroImage from "@/assets/hero-studio.jpg";
 const Index = () => {
   const [isUploading, setIsUploading] = useState(false);
   const navigate = useNavigate();
-  const { user, signOut, loading } = useAuth();
   const { state, setUploadedFileIds, setStep, addUploadedFile, resetWorkflow } = useWorkflow();
   const { toast } = useToast();
 
@@ -62,64 +60,7 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border/50 bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 bg-gradient-electric rounded-lg flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-electric-foreground" />
-            </div>
-            <h1 className="text-xl font-bold text-foreground">LuxSnap</h1>
-          </div>
-          <div className="flex items-center space-x-4">
-            {user && (
-              <>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={() => navigate("/library")}
-                >
-                  <FolderOpen className="h-4 w-4 mr-2" />
-                  Library
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={() => navigate("/settings")}
-                >
-                  <Settings className="h-4 w-4 mr-2" />
-                  Settings
-                </Button>
-              </>
-            )}
-            {user ? (
-              <Button variant="ghost" size="sm" onClick={signOut}>
-                <LogOut className="h-4 w-4 mr-2" />
-                Sign Out
-              </Button>
-            ) : (
-              <>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={() => navigate("/auth")}
-                >
-                  Sign In
-                </Button>
-                <Button 
-                  variant="electric" 
-                  size="sm"
-                  onClick={() => navigate("/auth?mode=signup")}
-                >
-                  Get Started
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
-
+    <>
       {/* Hero Section */}
       <section className="relative overflow-hidden">
         <div className="absolute inset-0">
@@ -180,7 +121,7 @@ const Index = () => {
           </div>
         </div>
       </footer>
-    </div>
+    </>
   );
 };
 

@@ -13,12 +13,11 @@ import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api-client";
 import { 
   SubjectPlacement, 
-  compositeLayers, 
   compositeLayersV2,
   getImageDimensions,
-  type CompositeOptions,
   type ReflectionOptions
 } from "@/lib/canvas-utils";
+import { fileToDataUrl } from "@/lib/file-utils";
 import { useWorkflow } from "@/contexts/WorkflowContext";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { createSizeBoundedBatches } from "@/lib/batch-utils";
@@ -90,16 +89,6 @@ export interface ImageProgress {
   currentStep?: string;
   error?: string;
 }
-
-// Helper to read File as Data URL
-const fileToDataUrl = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target?.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-};
 
 // Client-side crop calculation
 const calculateCanvasSize = (

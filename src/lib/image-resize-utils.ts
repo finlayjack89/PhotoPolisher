@@ -5,18 +5,6 @@
 import { cleanupCanvas } from '@/lib/canvas-utils';
 
 /**
- * Load an image from a URL
- */
-export const loadImage = (url: string): Promise<HTMLImageElement> => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Failed to load image'));
-    img.src = url;
-  });
-};
-
-/**
  * Get image dimensions from a File
  */
 export const getImageDimensions = (file: File): Promise<{ width: number; height: number }> => {
