@@ -29,8 +29,8 @@ Preferred communication style: Simple, everyday language.
 - **Opaque File IDs**: UUIDs are used to abstract file storage details, enabling flexible future cloud migration.
 - **API Hardening**: Includes timeout controls, exponential backoff, and defensive parsing for external API calls.
 - **Auto-Deskew System**: Automatically straightens tilted product images using advanced image processing techniques.
-- **Auto-Scale System**: Subjects automatically scale to 80% of backdrop width upon loading, preserving manual adjustments until new backdrops or subjects are introduced.
-- **Depth-of-Field Blur**: Applies a gradient blur effect to backdrops, with the bottom 30% remaining sharp and the top 70% progressively blurring.
+- **Auto-Scale System**: Subjects auto-scale to exactly 80% of backdrop width when loaded (no scale limits). Dimension-tracked reset recalculates when backdrop or subject changes. User manual adjustments preserved until new backdrop/subject loaded.
+- **F/2.8 Depth-of-Field Blur**: Professional aperture simulation using 24 horizontal strips with quadratic falloff (blur = 7px * t^2). Bottom 30% stays completely sharp (focus plane), top 70% progressively blurs. CSS preview uses separate z-indexed layers to ensure product never blurred.
 - **Memory Management**: Enforces memory-aware batch size validation (300MB total) and comprehensive cleanup of HTML canvas elements to prevent leaks.
 - **Dynamic Batch Sizing**: Calculates optimal batch sizes (3-10 images) based on image dimensions to maximize throughput.
 - **Performance Metrics Logging**: Comprehensive timing instrumentation for all major operations to identify bottlenecks.
