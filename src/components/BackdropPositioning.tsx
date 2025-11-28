@@ -190,8 +190,10 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     const targetWidth = backdropDimensions.w * 0.8;
     const optimalScale = targetWidth / subjectDimensions.w;
     
-    // Clamp scale to reasonable range (0.5x to 2.0x)
-    const clampedScale = Math.max(0.5, Math.min(2.0, optimalScale));
+    // No clamps - subject MUST fill exactly 80% of backdrop width regardless of original size
+    // Small subjects may need 10x+ scaling up, large subjects may need 0.01x scaling down
+    // Use exact calculated scale to guarantee 80% width target is always met
+    const clampedScale = optimalScale;
     
     console.log('📏 [Auto-Scale] Calculating optimal scale:', {
       backdropWidth: backdropDimensions.w,
@@ -336,7 +338,9 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         aspectRatio: aspectRatio,
       },
       // Backdrop layer - absolute positioned, applies blur ONLY here
-      // Depth-of-field gradient: sharp at bottom, subtle blur at top
+      // F/2.8 Depth-of-field simulation: bottom 30% sharp, top 70% with quadratic blur falloff
+      // Note: CSS can't do true gradient blur, so we use a fixed blur with gradient opacity mask
+      // The mask fades in the blurred layer over the sharp layer to simulate DOF
       backdropStyles: {
         position: 'absolute' as const,
         inset: 0,
@@ -344,15 +348,17 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
-        // Gradient blur mask: sharp at bottom (0%), subtle blur at top
-        // Using CSS mask with gradient for depth-of-field simulation
+        // F/2.8 aperture simulation: quadratic falloff from 30% height to top
+        // Bottom 30% = fully transparent (shows sharp layer below)
+        // 30% to 100% = gradual opacity increase following quadratic curve
         maskImage: blurBackground 
-          ? 'linear-gradient(to top, black 0%, black 30%, rgba(0,0,0,0.7) 60%, rgba(0,0,0,0.4) 100%)'
+          ? 'linear-gradient(to top, transparent 0%, transparent 30%, rgba(0,0,0,0.15) 45%, rgba(0,0,0,0.4) 60%, rgba(0,0,0,0.7) 80%, black 100%)'
           : 'none',
         WebkitMaskImage: blurBackground 
-          ? 'linear-gradient(to top, black 0%, black 30%, rgba(0,0,0,0.7) 60%, rgba(0,0,0,0.4) 100%)'
+          ? 'linear-gradient(to top, transparent 0%, transparent 30%, rgba(0,0,0,0.15) 45%, rgba(0,0,0,0.4) 60%, rgba(0,0,0,0.7) 80%, black 100%)'
           : 'none',
-        filter: blurBackground ? 'blur(3px)' : 'none',
+        // Max blur of 7px for f/2.8 simulation - gentle, professional look
+        filter: blurBackground ? 'blur(7px)' : 'none',
         zIndex: 0,
       },
       // Sharp backdrop layer underneath (for areas that should be sharp)
