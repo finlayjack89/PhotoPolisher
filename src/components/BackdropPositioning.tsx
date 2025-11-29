@@ -306,6 +306,11 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     }
   };
 
+  // No artificial clamping - allow full vertical range [0, 1]
+  // User can position subject anywhere from top (y close to 0, may clip) to bottom (y=1)
+  // This gives complete freedom as requested by the user
+  const minYClamp = 0;
+
   // --- Start CSS Preview Logic ---
   const getPreviewStyles = () => {
     if (!previewCutout) return {};
@@ -332,6 +337,11 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     // Scale can be adjusted via placement.scale if needed
     const subjectScale = placement.scale || 1.0;
     
+    // Blueprint-aligned depth-of-field blur gradient
+    // Focus plane at 70% from top (bottom 30% stays sharp)
+    // Gradient stops: 0% opacity 1.0, 40% opacity 0.8, 70% opacity 0.0, 100% opacity 0.0
+    const blurGradient = 'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.8) 40%, rgba(0,0,0,0) 70%, rgba(0,0,0,0) 100%)';
+    
     return {
       // Container just sets the aspect ratio, no background
       containerStyles: {
@@ -347,41 +357,37 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         backgroundRepeat: 'no-repeat',
         zIndex: 0,
       },
-      // Blurred backdrop layer - ONLY covers top 70%, blends at bottom edge
-      // This layer sits on top of the sharp layer and has a gradient mask at its bottom
-      // to create the smooth f/2.8 depth-of-field transition
+      // Blurred backdrop layer - FULL HEIGHT with gradient alpha mask
+      // Blueprint: 12px blur simulates f/2.8 aperture on ~2000px image
+      // The gradient mask fades the blur from full at top to zero at focus plane (70%)
       backdropStyles: {
         position: 'absolute' as const,
-        top: 0,
-        left: 0,
-        right: 0,
-        height: '70%', // Only covers top 70% of container
+        inset: 0, // Full height - gradient mask controls visibility
         backgroundImage: `url(${backdrop})`,
         backgroundSize: 'cover',
-        backgroundPosition: 'center top',
+        backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
-        // Gradient mask: fully visible at top, fades to transparent at bottom
-        // This blends the blurred layer into the sharp layer below
-        maskImage: blurBackground 
-          ? 'linear-gradient(to bottom, black 0%, black 50%, rgba(0,0,0,0.7) 70%, rgba(0,0,0,0.3) 85%, transparent 100%)'
-          : 'none',
-        WebkitMaskImage: blurBackground 
-          ? 'linear-gradient(to bottom, black 0%, black 50%, rgba(0,0,0,0.7) 70%, rgba(0,0,0,0.3) 85%, transparent 100%)'
-          : 'none',
-        // f/2.8 blur - 7px is gentle and professional
-        filter: blurBackground ? 'blur(7px)' : 'none',
+        // Blueprint gradient: fully blurred at top, fades to sharp at focus plane
+        maskImage: blurBackground ? blurGradient : 'none',
+        WebkitMaskImage: blurBackground ? blurGradient : 'none',
+        // Blueprint: 12px blur for ~2000px images creates creamy bokeh
+        filter: blurBackground ? 'blur(12px)' : 'none',
         zIndex: 1,
       },
       // Subject layer - NEVER blurred, on top of everything
-      // Width is set to 80% of container to match the 80% width requirement
+      // Width is set to 80% of container, full vertical movement range
+      // Positioning: placement.y represents the BOTTOM edge of the subject (0-1)
+      // y=0 means bottom at top (subject above container), y=1 means bottom at container bottom
+      // This matches the canvas compositor semantics in computeCompositeLayout
       subjectStyles: {
         width: '80%', // Subject fills 80% of backdrop width
         height: 'auto',
         position: 'absolute' as const,
-        transform: 'translateX(-50%)',
+        // translateY(-100%) anchors at bottom edge, so subject's bottom is at top: y%
+        transform: 'translate(-50%, -100%)',
         transformOrigin: 'center bottom',
         left: `${placement.x * 100}%`,
-        bottom: `${(1 - placement.y) * 100}%`,
+        top: `${placement.y * 100}%`,
         zIndex: 10,
       }
     };
@@ -600,7 +606,8 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                       setPlacement(prev => ({
                         ...prev,
                         x: 0.5,
-                        y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height))
+                        // Clamp y between minYClamp (subject top at container top) and 1 (subject bottom at container bottom)
+                        y: Math.max(minYClamp, Math.min(1, (e.clientY - rect.top) / rect.height))
                       }));
                     }}
                     onMouseUp={() => setIsDragging(false)}
@@ -614,7 +621,8 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                       setPlacement(prev => ({
                         ...prev,
                         x: 0.5,
-                        y: Math.max(0, Math.min(1, (touch.clientY - rect.top) / rect.height))
+                        // Clamp y between minYClamp (subject top at container top) and 1 (subject bottom at container bottom)
+                        y: Math.max(minYClamp, Math.min(1, (touch.clientY - rect.top) / rect.height))
                       }));
                     }}
                     onTouchEnd={() => setIsDragging(false)}

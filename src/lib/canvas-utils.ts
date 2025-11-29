@@ -353,18 +353,19 @@ export async function compositeLayersV2(
     const productY = layout.productRect.y;
 
     // 4. Draw Backdrop (Bottom Layer) - with optional f/2.8 depth-of-field blur
+    // Blueprint: Offscreen canvas compositing with gradient alpha mask
     if (blurBackground) {
-      // F/2.8 Depth-of-field simulation:
-      // - Bottom 30% of image: completely sharp (focus plane where product sits)
-      // - Top 70%: quadratic blur falloff from 0px to 7px max (simulates f/2.8 bokeh)
-      // Using 24 horizontal strips for ultra-smooth gradient without visible banding
-      const numStrips = 24;
-      const stripHeight = layout.canvasHeight / numStrips;
-      const maxBlur = 7; // f/2.8 produces gentle, professional bokeh
-      const focusPlaneRatio = 0.3; // Bottom 30% stays completely sharp
-      const focusPlaneStart = (1 - focusPlaneRatio); // 70% from top = where blur ends
+      // Blueprint specifications for realistic DOF simulation:
+      // - BLUR_RADIUS: 12px (for ~2000px images, creates creamy bokeh)
+      // - FOCUS_PLANE_Y: 0.7 (70% down from top = bottom 30% sharp)
+      // - Gradient: 0% opacity 1.0, 40% opacity 0.8, 70% opacity 0.0, 100% opacity 0.0
+      const BLUR_RADIUS = Math.round(layout.canvasWidth * 0.006); // Dynamic: ~12px for 2000px
+      const blurPx = Math.max(8, Math.min(16, BLUR_RADIUS)); // Clamp between 8-16px
       
-      // Create temporary canvas for blur compositing
+      // Step 1: Draw sharp backdrop as base layer (Layer A)
+      ctx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
+      
+      // Step 2: Create offscreen canvas for blur effect (Layer B)
       const blurCanvas = document.createElement('canvas');
       try {
         blurCanvas.width = layout.canvasWidth;
@@ -372,43 +373,35 @@ export async function compositeLayersV2(
         const blurCtx = blurCanvas.getContext('2d');
         
         if (blurCtx) {
-          // Draw each strip from top to bottom
-          for (let i = 0; i < numStrips; i++) {
-            // Use BOTTOM edge of strip to determine if ANY part touches focus plane
-            // This ensures the entire bottom 30% stays completely sharp
-            const stripBottomNorm = (i + 1) / numStrips;
-            
-            // F/2.8 quadratic blur falloff:
-            // If strip's bottom edge is at or below focus plane start (70% from top), keep it sharp
-            // Only strips entirely above the focus plane get blur
-            let blurAmount = 0;
-            
-            if (stripBottomNorm <= focusPlaneStart) {
-              // This strip is entirely above focus plane - apply blur
-              // Use strip center for blur amount calculation for smooth gradient
-              const stripCenterNorm = (i + 0.5) / numStrips;
-              // t = 0 at focus plane boundary, t = 1 at very top
-              const t = 1 - (stripCenterNorm / focusPlaneStart);
-              // Quadratic falloff: blur = maxBlur * t^2
-              blurAmount = maxBlur * (t * t);
-            }
-            // If stripBottomNorm > 0.7, this strip touches the focus plane - keep it sharp
-            
-            const y = i * stripHeight;
-            const srcY = (y / layout.canvasHeight) * backdropImg.naturalHeight;
-            const srcH = (stripHeight / layout.canvasHeight) * backdropImg.naturalHeight;
-            
-            // Apply blur filter for this strip (only if blur > 0.2px for performance)
-            blurCtx.filter = blurAmount > 0.2 ? `blur(${blurAmount.toFixed(1)}px)` : 'none';
-            blurCtx.drawImage(
-              backdropImg,
-              0, srcY, backdropImg.naturalWidth, srcH,
-              0, y, layout.canvasWidth, stripHeight + 1 // +1 to prevent gaps
-            );
-          }
+          // Draw full backdrop with blur
+          blurCtx.filter = `blur(${blurPx}px)`;
+          blurCtx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
+          blurCtx.filter = 'none';
           
+          // Step 3: Apply gradient alpha mask using destination-in
+          // This "cookie cuts" the blur layer with the gradient
+          blurCtx.globalCompositeOperation = 'destination-in';
+          
+          // Create linear gradient matching blueprint:
+          // 0%: opacity 1.0 (full blur at top)
+          // 40%: opacity 0.8 (maintain strong blur through mid-background)
+          // 70%: opacity 0.0 (focus plane - blur fades out completely)
+          // 100%: opacity 0.0 (bottom stays sharp)
+          const gradient = blurCtx.createLinearGradient(0, 0, 0, layout.canvasHeight);
+          gradient.addColorStop(0.0, 'rgba(0,0,0,1.0)');   // Top: full opacity (full blur)
+          gradient.addColorStop(0.4, 'rgba(0,0,0,0.8)');   // 40%: maintain blur
+          gradient.addColorStop(0.7, 'rgba(0,0,0,0.0)');   // Focus plane: zero opacity
+          gradient.addColorStop(1.0, 'rgba(0,0,0,0.0)');   // Bottom: zero opacity
+          
+          blurCtx.fillStyle = gradient;
+          blurCtx.fillRect(0, 0, layout.canvasWidth, layout.canvasHeight);
+          
+          // Reset composite operation
+          blurCtx.globalCompositeOperation = 'source-over';
+          
+          // Step 4: Composite blur layer over sharp backdrop
           ctx.drawImage(blurCanvas, 0, 0);
-          console.log('📸 [F/2.8 DOF] Applied quadratic blur: bottom 30%+ sharp → ' + maxBlur + 'px at top (24 strips)');
+          console.log(`📸 [Blueprint DOF] Applied ${blurPx}px blur with gradient mask (focus plane at 70%)`);
         }
       } finally {
         // Always clean up blur canvas to prevent memory leaks

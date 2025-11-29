@@ -1,0 +1,71 @@
+Architectural Blueprint: Realistic Depth of Field Simulation
+Objective: Implement a "Variable Blur" compositing engine that mimics a camera lens with a wide aperture (f/2.8). The goal is to create a seamless depth separation between a sharp foreground (product floor) and a soft background (studio wall).
+
+1. The Visual Physics Model
+To simulate a professional studio environment, the application must treat the 2D backdrop image as if it has 3D depth.
+
+The Scene: A continuous studio sweep (infinity curve).
+
+The Focus Plane: The camera is focused on the product, which sits on the "floor" roughly 30% up from the bottom of the frame.
+
+The Falloff: Everything below the focus plane (the foreground) is sharp. Everything above the focus plane (the background) gradually falls out of focus as it recedes into the distance.
+
+2. Technical Architecture
+The implementation should utilize an Offscreen Canvas Compositing strategy. This prevents "halo" artifacts (where blur bleeds into sharp areas) and ensures performance.
+
+Layer Stack (Bottom to Top):
+
+Layer A (Base): The original, unmodified high-resolution backdrop.
+
+Layer B (Effect): A duplicate of the backdrop with a heavy Gaussian blur applied.
+
+Layer C (Mask): A dynamic alpha mask that determines visibility of Layer B.
+
+3. Key Variables & Values
+These parameters are tuned for a standard e-commerce resolution (approx. 2000x2000px) to simulate an 85mm lens at f/2.8.
+
+BLUR_RADIUS: 12px
+
+Context: A standard linear Gaussian blur. 12px creates a sufficiently creamy "bokeh" effect that obliterates fine texture details (like canvas grain or paper wrinkles) without rendering the background unrecognizable.
+
+FOCUS_PLANE_Y: 0.7 (70% down from the top)
+
+Context: This is the virtual "horizon line" where the product sits. In canvas coordinate space (0 at top, 1 at bottom), this is the threshold where the blur must hit 0% opacity.
+
+GRADIENT_STOPS:
+
+Stop 0.0 (Top Edge): Opacity 1.0 (Maximum Blur). The wall furthest from the camera.
+
+Stop 0.4 (Mid-Background): Opacity 0.8. Maintains strong blur through the vertical portion of the backdrop.
+
+Stop 0.7 (Focus Plane): Opacity 0.0. The exact point where the blur fades out completely.
+
+Stop 1.0 (Bottom Edge): Opacity 0.0. The foreground remains perfectly sharp.
+
+4. Implementation Logic (Step-by-Step)
+Direct the AI to implement the feature using this specific logic flow:
+
+Context Creation: Initialize an offscreen canvas matching the exact dimensions of the target backdrop.
+
+Blur Generation: Draw the full backdrop onto the offscreen canvas and apply the filter property with the BLUR_RADIUS. This creates "Layer B".
+
+Mask Generation: Construct a Linear Vertical Gradient on the offscreen canvas.
+
+Use the GRADIENT_STOPS defined above.
+
+The gradient should transition from opaque black (top) to transparent (bottom).
+
+Compositing (The "Cookie Cutter"): Apply the gradient to the blurred image using the Destination-In composite operation.
+
+Result: A backdrop that is fully transparent at the bottom and fully blurred at the top.
+
+Final Assembly: Switch back to the main canvas context.
+
+Draw Layer A (Sharp Backdrop).
+
+Draw the result of Step 4 (Variable Blur Layer) directly on top using Source-Over.
+
+5. Edge Case Handling
+Resolution Independence: The BLUR_RADIUS should ideally be dynamic based on image width (e.g., width * 0.006), but a hardcoded 12px is safe for the current MVP constraints.
+
+Performance: Ensure the blur context is created and destroyed within the function scope to prevent memory leaks in the browser's graphics layer.
