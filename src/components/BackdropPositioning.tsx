@@ -337,10 +337,9 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     // Scale can be adjusted via placement.scale if needed
     const subjectScale = placement.scale || 1.0;
     
-    // Blueprint-aligned depth-of-field blur gradient
-    // Focus plane at 70% from top (bottom 30% stays sharp)
-    // Gradient stops: 0% opacity 1.0, 40% opacity 0.8, 70% opacity 0.0, 100% opacity 0.0
-    const blurGradient = 'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.8) 40%, rgba(0,0,0,0) 70%, rgba(0,0,0,0) 100%)';
+    // Updated gradient stops to match canvas-utils (0.9 -> 0.15 opacity)
+    // "Long ramp" gradient: blur extends lower with subtle fade at 90%
+    const blurGradient = 'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 90%, rgba(0,0,0,0) 100%)';
     
     return {
       // Container just sets the aspect ratio, no background
@@ -358,8 +357,8 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         zIndex: 0,
       },
       // Blurred backdrop layer - FULL HEIGHT with gradient alpha mask
-      // Blueprint: 12px blur simulates f/2.8 aperture on ~2000px image
-      // The gradient mask fades the blur from full at top to zero at focus plane (70%)
+      // Blueprint: 9px blur (75% intensity) with "long ramp" gradient
+      // Blur extends to 90% of frame with subtle fade, keeping bottom edge sharp
       backdropStyles: {
         position: 'absolute' as const,
         inset: 0, // Full height - gradient mask controls visibility
@@ -367,11 +366,11 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
-        // Blueprint gradient: fully blurred at top, fades to sharp at focus plane
+        // Long ramp gradient: blur visible through most of frame, fading at 90%
         maskImage: blurBackground ? blurGradient : 'none',
         WebkitMaskImage: blurBackground ? blurGradient : 'none',
-        // Blueprint: 12px blur for ~2000px images creates creamy bokeh
-        filter: blurBackground ? 'blur(12px)' : 'none',
+        // Update pixel radius to match canvas (9px)
+        filter: blurBackground ? 'blur(9px)' : 'none',
         zIndex: 1,
       },
       // Subject layer - NEVER blurred, on top of everything

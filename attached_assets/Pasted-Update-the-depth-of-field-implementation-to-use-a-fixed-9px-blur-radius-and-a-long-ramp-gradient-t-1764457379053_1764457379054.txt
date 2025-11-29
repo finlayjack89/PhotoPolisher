@@ -1,0 +1,84 @@
+Update the depth-of-field implementation to use a fixed 9px blur radius and a "long ramp" gradient that starts blurring at 90% Y-axis.
+
+1. Update src/lib/canvas-utils.ts
+First, add this standalone function to the file scope (outside other functions) to handle the specific gradient mask physics:
+
+TypeScript
+
+/**
+ * Applies a realistic f/2.8 depth of field effect with a gradual floor ramp.
+ * Configured for "75% intensity" (9px) and "starts lower" logic (0.9 stop).
+ */
+const applyDepthOfField = (
+  ctx: CanvasRenderingContext2D, 
+  image: HTMLImageElement, 
+  width: number, 
+  height: number
+) => {
+  const blurCanvas = document.createElement('canvas');
+  blurCanvas.width = width;
+  blurCanvas.height = height;
+  const blurCtx = blurCanvas.getContext('2d');
+  
+  if (!blurCtx) return;
+
+  // 1. Reduced Blur Radius (75% strength)
+  blurCtx.filter = 'blur(9px)'; 
+  blurCtx.drawImage(image, 0, 0, width, height);
+  blurCtx.filter = 'none';
+
+  // 2. Refined "Long Ramp" Gradient
+  // Pushes the zero-blur point down to 100%, with partial blur starting at 90%
+  const gradient = blurCtx.createLinearGradient(0, 0, 0, height);
+  gradient.addColorStop(0, 'rgba(0,0,0,1)');        // Top: Max blur
+  gradient.addColorStop(0.4, 'rgba(0,0,0,0.85)');   // Horizon: Strong blur
+  gradient.addColorStop(0.65, 'rgba(0,0,0,0.5)');   // Mid-Floor: Visible blur
+  gradient.addColorStop(0.9, 'rgba(0,0,0,0.15)');   // Low-Floor: Subtle blur creeps in
+  gradient.addColorStop(1, 'rgba(0,0,0,0)');        // Bottom Edge: Sharp anchor
+
+  // 3. Apply Mask
+  blurCtx.globalCompositeOperation = 'destination-in';
+  blurCtx.fillStyle = gradient;
+  blurCtx.fillRect(0, 0, width, height);
+
+  // 4. Composite
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(blurCanvas, 0, 0);
+  ctx.restore();
+};
+Next, locate the compositeLayersV2 function and replace the entire "Draw Backdrop" block (Layer 4) with this call:
+
+TypeScript
+
+    // 4. Draw Backdrop (Bottom Layer)
+    if (blurBackground) {
+      // Draw sharp base first
+      ctx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
+      
+      // Apply the tuned Depth of Field overlay
+      console.log('📷 Applying tuned f/2.8 Depth of Field...');
+      applyDepthOfField(ctx, backdropImg, layout.canvasWidth, layout.canvasHeight);
+    } else {
+      ctx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
+    }
+2. Update src/components/BackdropPositioning.tsx
+Locate the getPreviewStyles function and update these two values to match the canvas logic exactly:
+
+TypeScript
+
+    // Updated gradient stops to match canvas-utils (0.9 -> 0.15 opacity)
+    const blurGradient = 'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 90%, rgba(0,0,0,0) 100%)';
+    
+    return {
+      // ... existing code ...
+      backdropStyles: {
+        // ... existing code ...
+        maskImage: blurBackground ? blurGradient : 'none',
+        WebkitMaskImage: blurBackground ? blurGradient : 'none',
+        // Update pixel radius to match canvas (9px)
+        filter: blurBackground ? 'blur(9px)' : 'none', 
+        zIndex: 1,
+      },
+      // ... existing code ...
+    };

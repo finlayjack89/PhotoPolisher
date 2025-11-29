@@ -3,6 +3,53 @@ import { loadImage } from './file-utils';
 import { generateSmartReflection } from './reflection-utils';
 
 /**
+ * Applies a realistic f/2.8 depth of field effect with a gradual floor ramp.
+ * Configured for "75% intensity" (9px) and "starts lower" logic (0.9 stop).
+ */
+const applyDepthOfField = (
+  ctx: CanvasRenderingContext2D, 
+  image: HTMLImageElement, 
+  width: number, 
+  height: number
+) => {
+  const blurCanvas = document.createElement('canvas');
+  blurCanvas.width = width;
+  blurCanvas.height = height;
+  const blurCtx = blurCanvas.getContext('2d');
+  
+  if (!blurCtx) return;
+
+  // 1. Reduced Blur Radius (75% strength)
+  blurCtx.filter = 'blur(9px)'; 
+  blurCtx.drawImage(image, 0, 0, width, height);
+  blurCtx.filter = 'none';
+
+  // 2. Refined "Long Ramp" Gradient
+  // Pushes the zero-blur point down to 100%, with partial blur starting at 90%
+  const gradient = blurCtx.createLinearGradient(0, 0, 0, height);
+  gradient.addColorStop(0, 'rgba(0,0,0,1)');        // Top: Max blur
+  gradient.addColorStop(0.4, 'rgba(0,0,0,0.85)');   // Horizon: Strong blur
+  gradient.addColorStop(0.65, 'rgba(0,0,0,0.5)');   // Mid-Floor: Visible blur
+  gradient.addColorStop(0.9, 'rgba(0,0,0,0.15)');   // Low-Floor: Subtle blur creeps in
+  gradient.addColorStop(1, 'rgba(0,0,0,0)');        // Bottom Edge: Sharp anchor
+
+  // 3. Apply Mask
+  blurCtx.globalCompositeOperation = 'destination-in';
+  blurCtx.fillStyle = gradient;
+  blurCtx.fillRect(0, 0, width, height);
+
+  // 4. Composite
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(blurCanvas, 0, 0);
+  ctx.restore();
+  
+  // 5. Cleanup
+  blurCanvas.width = 0;
+  blurCanvas.height = 0;
+};
+
+/**
  * Clean up a canvas to hint garbage collection to free memory faster.
  * This is critical for batch processing of large images to prevent memory buildup.
  * 
@@ -352,61 +399,14 @@ export async function compositeLayersV2(
     const shadowY = layout.shadowedSubjectRect.y;
     const productY = layout.productRect.y;
 
-    // 4. Draw Backdrop (Bottom Layer) - with optional f/2.8 depth-of-field blur
-    // Blueprint: Offscreen canvas compositing with gradient alpha mask
+    // 4. Draw Backdrop (Bottom Layer)
     if (blurBackground) {
-      // Blueprint specifications for realistic DOF simulation:
-      // - BLUR_RADIUS: 12px (for ~2000px images, creates creamy bokeh)
-      // - FOCUS_PLANE_Y: 0.7 (70% down from top = bottom 30% sharp)
-      // - Gradient: 0% opacity 1.0, 40% opacity 0.8, 70% opacity 0.0, 100% opacity 0.0
-      const BLUR_RADIUS = Math.round(layout.canvasWidth * 0.006); // Dynamic: ~12px for 2000px
-      const blurPx = Math.max(8, Math.min(16, BLUR_RADIUS)); // Clamp between 8-16px
-      
-      // Step 1: Draw sharp backdrop as base layer (Layer A)
+      // Draw sharp base first
       ctx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
       
-      // Step 2: Create offscreen canvas for blur effect (Layer B)
-      const blurCanvas = document.createElement('canvas');
-      try {
-        blurCanvas.width = layout.canvasWidth;
-        blurCanvas.height = layout.canvasHeight;
-        const blurCtx = blurCanvas.getContext('2d');
-        
-        if (blurCtx) {
-          // Draw full backdrop with blur
-          blurCtx.filter = `blur(${blurPx}px)`;
-          blurCtx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
-          blurCtx.filter = 'none';
-          
-          // Step 3: Apply gradient alpha mask using destination-in
-          // This "cookie cuts" the blur layer with the gradient
-          blurCtx.globalCompositeOperation = 'destination-in';
-          
-          // Create linear gradient matching blueprint:
-          // 0%: opacity 1.0 (full blur at top)
-          // 40%: opacity 0.8 (maintain strong blur through mid-background)
-          // 70%: opacity 0.0 (focus plane - blur fades out completely)
-          // 100%: opacity 0.0 (bottom stays sharp)
-          const gradient = blurCtx.createLinearGradient(0, 0, 0, layout.canvasHeight);
-          gradient.addColorStop(0.0, 'rgba(0,0,0,1.0)');   // Top: full opacity (full blur)
-          gradient.addColorStop(0.4, 'rgba(0,0,0,0.8)');   // 40%: maintain blur
-          gradient.addColorStop(0.7, 'rgba(0,0,0,0.0)');   // Focus plane: zero opacity
-          gradient.addColorStop(1.0, 'rgba(0,0,0,0.0)');   // Bottom: zero opacity
-          
-          blurCtx.fillStyle = gradient;
-          blurCtx.fillRect(0, 0, layout.canvasWidth, layout.canvasHeight);
-          
-          // Reset composite operation
-          blurCtx.globalCompositeOperation = 'source-over';
-          
-          // Step 4: Composite blur layer over sharp backdrop
-          ctx.drawImage(blurCanvas, 0, 0);
-          console.log(`📸 [Blueprint DOF] Applied ${blurPx}px blur with gradient mask (focus plane at 70%)`);
-        }
-      } finally {
-        // Always clean up blur canvas to prevent memory leaks
-        cleanupCanvas(blurCanvas);
-      }
+      // Apply the tuned Depth of Field overlay
+      console.log('📷 Applying tuned f/2.8 Depth of Field...');
+      applyDepthOfField(ctx, backdropImg, layout.canvasWidth, layout.canvasHeight);
     } else {
       ctx.drawImage(backdropImg, 0, 0, layout.canvasWidth, layout.canvasHeight);
     }
