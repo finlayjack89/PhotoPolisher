@@ -337,31 +337,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
       containerStyles: {
         aspectRatio: aspectRatio,
       },
-      // Backdrop layer - absolute positioned, applies blur ONLY here
-      // F/2.8 Depth-of-field simulation: bottom 30% sharp, top 70% with quadratic blur falloff
-      // Note: CSS can't do true gradient blur, so we use a fixed blur with gradient opacity mask
-      // The mask fades in the blurred layer over the sharp layer to simulate DOF
-      backdropStyles: {
-        position: 'absolute' as const,
-        inset: 0,
-        backgroundImage: `url(${backdrop})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        // F/2.8 aperture simulation: quadratic falloff from 30% height to top
-        // Bottom 30% = fully transparent (shows sharp layer below)
-        // 30% to 100% = gradual opacity increase following quadratic curve
-        maskImage: blurBackground 
-          ? 'linear-gradient(to top, transparent 0%, transparent 30%, rgba(0,0,0,0.15) 45%, rgba(0,0,0,0.4) 60%, rgba(0,0,0,0.7) 80%, black 100%)'
-          : 'none',
-        WebkitMaskImage: blurBackground 
-          ? 'linear-gradient(to top, transparent 0%, transparent 30%, rgba(0,0,0,0.15) 45%, rgba(0,0,0,0.4) 60%, rgba(0,0,0,0.7) 80%, black 100%)'
-          : 'none',
-        // Max blur of 7px for f/2.8 simulation - gentle, professional look
-        filter: blurBackground ? 'blur(7px)' : 'none',
-        zIndex: 0,
-      },
-      // Sharp backdrop layer underneath (for areas that should be sharp)
+      // Sharp backdrop layer - ALWAYS at full opacity, covers entire area
       sharpBackdropStyles: {
         position: 'absolute' as const,
         inset: 0,
@@ -369,20 +345,43 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
-        zIndex: -1,
+        zIndex: 0,
       },
-      // Subject layer - NEVER blurred, on top of backdrop
+      // Blurred backdrop layer - ONLY covers top 70%, blends at bottom edge
+      // This layer sits on top of the sharp layer and has a gradient mask at its bottom
+      // to create the smooth f/2.8 depth-of-field transition
+      backdropStyles: {
+        position: 'absolute' as const,
+        top: 0,
+        left: 0,
+        right: 0,
+        height: '70%', // Only covers top 70% of container
+        backgroundImage: `url(${backdrop})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center top',
+        backgroundRepeat: 'no-repeat',
+        // Gradient mask: fully visible at top, fades to transparent at bottom
+        // This blends the blurred layer into the sharp layer below
+        maskImage: blurBackground 
+          ? 'linear-gradient(to bottom, black 0%, black 50%, rgba(0,0,0,0.7) 70%, rgba(0,0,0,0.3) 85%, transparent 100%)'
+          : 'none',
+        WebkitMaskImage: blurBackground 
+          ? 'linear-gradient(to bottom, black 0%, black 50%, rgba(0,0,0,0.7) 70%, rgba(0,0,0,0.3) 85%, transparent 100%)'
+          : 'none',
+        // f/2.8 blur - 7px is gentle and professional
+        filter: blurBackground ? 'blur(7px)' : 'none',
+        zIndex: 1,
+      },
+      // Subject layer - NEVER blurred, on top of everything
+      // Width is set to 80% of container to match the 80% width requirement
       subjectStyles: {
-        // Subject renders at natural size controlled by placement.scale only
-        // No artificial clamps - user has full control over positioning
-        width: 'auto',
+        width: '80%', // Subject fills 80% of backdrop width
         height: 'auto',
-        maxWidth: 'none',
-        maxHeight: 'none',
-        transform: `translate(-50%, -100%) scale(${subjectScale})`,
+        position: 'absolute' as const,
+        transform: 'translateX(-50%)',
         transformOrigin: 'center bottom',
         left: `${placement.x * 100}%`,
-        top: `${placement.y * 100}%`,
+        bottom: `${(1 - placement.y) * 100}%`,
         zIndex: 10,
       }
     };
