@@ -40,6 +40,7 @@ Preferred communication style: Simple, everyday language.
 - **Smart Reflection Generator**: Creates photorealistic product reflections with performance-optimized blur, Fresnel falloff, and subtle opacity.
 - **Contact Shadow System**: Adds realistic grounding effects with downscaled, blurred black silhouettes.
 - **Simplified Positioning**: User-controlled product positioning without automatic padding manipulation.
+- **Reference Width Strategy for Preview-Export Parity**: Compositing engine uses `REFERENCE_WIDTH = 3000` constant with `getScaledValue(baseValue, currentWidth)` helper for proportional blur scaling. All spatial effects (depth-of-field, reflections, contact shadows) scale proportionally to canvas width without caps. Preview uses display-space projection (`displayScale = canvasWidth / backdropWidth`) and separates shadow vs clean dimensions for accurate layout calculation. When Cloudinary shadow is ready, exact dimensions are used; otherwise, estimated padding (1.4x ratio) maintains approximate positioning until shadow loads.
 
 ## External Dependencies
 
