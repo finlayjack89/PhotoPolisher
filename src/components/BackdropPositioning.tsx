@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,7 +25,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import { SubjectPlacement, getImageDimensions } from "@/lib/canvas-utils";
+import { SubjectPlacement, getImageDimensions, computeCompositeLayout, applyDepthOfField } from "@/lib/canvas-utils";
 import { fileToDataUrl } from "@/lib/file-utils";
 import { useToast } from "@/hooks/use-toast";
 import { BackdropLibrary } from "@/components/BackdropLibrary";
@@ -36,13 +36,12 @@ import { ShadowControls } from "@/components/ShadowControls";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { generateCloudinaryPreviewUrl, uploadPreviewToCloudinary } from "@/lib/cloudinary-preview-utils";
 
-// Define the type for a processed subject
 interface ProcessedSubject {
   name: string;
   originalData: string;
   backgroundRemovedData: string;
-  deskewedData?: string; // Rotated version with background removed
-  cleanDeskewedData?: string; // Rotated version without effects
+  deskewedData?: string;
+  cleanDeskewedData?: string;
   size: number;
   originalSize?: number;
   rotationAngle?: number;
@@ -75,13 +74,12 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   const [isPreviewLoading, setIsPreviewLoading] = useState(true);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
-  // Master Rules State
   const [masterAspectRatio, setMasterAspectRatio] = useState("original");
   const [blurBackground, setBlurBackground] = useState(false);
   
   const [placement, setPlacement] = useState<SubjectPlacement>({
-    x: 0.5, // X is always 50%
-    y: 1, // Bottom position (user can override)
+    x: 0.5,
+    y: 1,
     scale: 1.0, 
   });
 
@@ -94,24 +92,34 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   const [backdropDimensions, setBackdropDimensions] = useState({ w: 1, h: 1 });
   const [hasAutoScaled, setHasAutoScaled] = useState(false);
 
-  // Shadow customization state
   const [isShadowPanelOpen, setIsShadowPanelOpen] = useState(false);
   const [localAzimuth, setLocalAzimuth] = useState(state.shadowConfig.azimuth);
   const [localElevation, setLocalElevation] = useState(state.shadowConfig.elevation);
   const [localSpread, setLocalSpread] = useState(state.shadowConfig.spread);
 
-  // Cloudinary preview state
   const [cloudinaryPublicId, setCloudinaryPublicId] = useState<string>('');
   const [cloudinaryCloudName, setCloudinaryCloudName] = useState<string>('');
   const [livePreviewUrl, setLivePreviewUrl] = useState<string>('');
   const [isUploadingPreview, setIsUploadingPreview] = useState(false);
 
-  // Update context when shadow params change
+  // Canvas refs for Live Canvas Preview architecture
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const backdropImgRef = useRef<HTMLImageElement | null>(null);
+  const subjectImgRef = useRef<HTMLImageElement | null>(null);
+  
+  // Track what's cached in the offscreen buffer
+  const cachedBackdropRef = useRef<string>('');
+  const cachedBlurRef = useRef<boolean>(false);
+  
+  // State triggers to force canvas re-render when images load
+  const [backdropReady, setBackdropReady] = useState(false);
+  const [subjectReady, setSubjectReady] = useState(false);
+
   useEffect(() => {
     setShadowConfig({ azimuth: localAzimuth, elevation: localElevation, spread: localSpread });
   }, [localAzimuth, localElevation, localSpread, setShadowConfig]);
 
-  // This effect fetches the preview cutout
   useEffect(() => {
     const getPreviewCutout = async () => {
       if (!allSubjects || allSubjects.length === 0) {
@@ -130,7 +138,6 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
           cutoutData = await fileToDataUrl(firstSubject as File);
         } else {
           const subject = firstSubject as ProcessedSubject;
-          // Only use deskewed data if rotation confidence >= 75
           const wasRotated = subject.rotationConfidence && subject.rotationConfidence >= 75;
           cutoutData = wasRotated && subject.deskewedData 
             ? subject.deskewedData 
@@ -161,7 +168,6 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     getPreviewCutout();
   }, [allSubjects, isPreCut]);
 
-  // This effect updates the backdrop dimensions
   useEffect(() => {
     if (backdrop) {
       getImageDimensions(backdrop).then(dims => {
@@ -170,29 +176,19 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     }
   }, [backdrop]);
 
-  // Track previous dimensions to detect changes
   const prevBackdropWidthRef = useRef<number>(0);
   const prevSubjectWidthRef = useRef<number>(0);
 
-  // Auto-calculate scale so subject fills 80% of backdrop width
-  // Runs when backdrop or subject dimensions change
   useEffect(() => {
     if (backdropDimensions.w <= 1 || subjectDimensions.w <= 1) return;
     
-    // Check if dimensions have changed (new backdrop or subject)
     const backdropChanged = prevBackdropWidthRef.current !== backdropDimensions.w;
     const subjectChanged = prevSubjectWidthRef.current !== subjectDimensions.w;
     
-    // If neither changed and we've already scaled, skip
     if (!backdropChanged && !subjectChanged && hasAutoScaled) return;
     
-    // Calculate optimal scale: subject width should be 80% of backdrop width
     const targetWidth = backdropDimensions.w * 0.8;
     const optimalScale = targetWidth / subjectDimensions.w;
-    
-    // No clamps - subject MUST fill exactly 80% of backdrop width regardless of original size
-    // Small subjects may need 10x+ scaling up, large subjects may need 0.01x scaling down
-    // Use exact calculated scale to guarantee 80% width target is always met
     const clampedScale = optimalScale;
     
     console.log('📏 [Auto-Scale] Calculating optimal scale:', {
@@ -207,12 +203,10 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     setPlacement(prev => ({ ...prev, scale: clampedScale }));
     setHasAutoScaled(true);
     
-    // Update refs
     prevBackdropWidthRef.current = backdropDimensions.w;
     prevSubjectWidthRef.current = subjectDimensions.w;
   }, [backdropDimensions.w, subjectDimensions.w, hasAutoScaled]);
 
-  // Upload preview to Cloudinary when preview cutout is ready
   useEffect(() => {
     if (previewCutout && !cloudinaryPublicId) {
       const uploadPreview = async () => {
@@ -240,7 +234,6 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     }
   }, [previewCutout, cloudinaryPublicId, toast]);
 
-  // Update Cloudinary preview when shadow params change
   useEffect(() => {
     if (cloudinaryPublicId && cloudinaryCloudName) {
       const previewUrl = generateCloudinaryPreviewUrl(
@@ -252,14 +245,216 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
       setLivePreviewUrl(previewUrl);
     }
   }, [localAzimuth, localElevation, localSpread, cloudinaryPublicId, cloudinaryCloudName]);
+
+  // Load images into refs for canvas rendering
+  useEffect(() => {
+    if (backdrop) {
+      setBackdropReady(false);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        backdropImgRef.current = img;
+        cachedBackdropRef.current = '';
+        setBackdropReady(true);
+        console.log('🖼️ [Canvas] Backdrop image loaded');
+      };
+      img.src = backdrop;
+    }
+  }, [backdrop]);
+
+  useEffect(() => {
+    const subjectSrc = livePreviewUrl || previewCutout;
+    if (subjectSrc) {
+      setSubjectReady(false);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        subjectImgRef.current = img;
+        setSubjectReady(true);
+        console.log('🖼️ [Canvas] Subject image loaded');
+      };
+      img.src = subjectSrc;
+    }
+  }, [livePreviewUrl, previewCutout]);
+
+  // Calculate canvas dimensions based on aspect ratio
+  const getCanvasDimensions = useCallback(() => {
+    const containerWidth = 600; // Base preview width
+    let aspectRatio = 4 / 3;
+    
+    if (masterAspectRatio === '1:1') {
+      aspectRatio = 1;
+    } else if (masterAspectRatio === '3:4') {
+      aspectRatio = 3 / 4;
+    } else if (masterAspectRatio === '4:3') {
+      aspectRatio = 4 / 3;
+    } else if (masterAspectRatio === 'original' && backdropDimensions.w > 1 && backdropDimensions.h > 1) {
+      aspectRatio = backdropDimensions.w / backdropDimensions.h;
+    }
+    
+    return {
+      width: containerWidth,
+      height: Math.round(containerWidth / aspectRatio)
+    };
+  }, [masterAspectRatio, backdropDimensions]);
+
+  // Render the offscreen backdrop buffer (only when backdrop or blur changes)
+  const renderBackdropBuffer = useCallback(() => {
+    if (!backdropImgRef.current) return;
+    
+    const { width, height } = getCanvasDimensions();
+    
+    // Check if we need to re-render the buffer
+    const needsRerender = 
+      cachedBackdropRef.current !== backdrop ||
+      cachedBlurRef.current !== blurBackground ||
+      !offscreenCanvasRef.current ||
+      offscreenCanvasRef.current.width !== width ||
+      offscreenCanvasRef.current.height !== height;
+    
+    if (!needsRerender) return;
+    
+    console.log('🎨 [Canvas Preview] Rendering backdrop buffer...', { width, height, blurBackground });
+    
+    // Create or reuse offscreen canvas
+    if (!offscreenCanvasRef.current) {
+      offscreenCanvasRef.current = document.createElement('canvas');
+    }
+    
+    const offscreen = offscreenCanvasRef.current;
+    offscreen.width = width;
+    offscreen.height = height;
+    const ctx = offscreen.getContext('2d');
+    
+    if (!ctx || !backdropImgRef.current) return;
+    
+    // Draw sharp backdrop first
+    ctx.drawImage(backdropImgRef.current, 0, 0, width, height);
+    
+    // Apply depth of field if enabled (using the same function as batch export)
+    if (blurBackground) {
+      applyDepthOfField(ctx, backdropImgRef.current, width, height);
+    }
+    
+    // Update cache refs
+    cachedBackdropRef.current = backdrop;
+    cachedBlurRef.current = blurBackground;
+  }, [backdrop, blurBackground, getCanvasDimensions]);
+
+  // Main canvas render loop
+  const renderCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    const { width, height } = getCanvasDimensions();
+    
+    // Update canvas size if needed
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+    
+    // Render backdrop buffer if needed
+    renderBackdropBuffer();
+    
+    // Draw backdrop buffer
+    if (offscreenCanvasRef.current) {
+      ctx.drawImage(offscreenCanvasRef.current, 0, 0);
+    }
+    
+    // Draw subject using computeCompositeLayout for positioning
+    if (subjectImgRef.current && subjectDimensions.w > 1) {
+      // For preview, we use the canvas dimensions and the subject's natural dimensions
+      // The placement.scale is already calculated to make subject 80% of backdrop width
+      const layout = computeCompositeLayout(
+        width,
+        height,
+        subjectImgRef.current.naturalWidth,  // Shadow subject (same as clean for preview)
+        subjectImgRef.current.naturalHeight,
+        subjectImgRef.current.naturalWidth,  // Clean subject
+        subjectImgRef.current.naturalHeight,
+        placement
+      );
+      
+      // Draw subject at calculated position
+      ctx.drawImage(
+        subjectImgRef.current,
+        layout.productRect.x,
+        layout.productRect.y,
+        layout.productRect.width,
+        layout.productRect.height
+      );
+    }
+  }, [getCanvasDimensions, renderBackdropBuffer, placement, subjectDimensions]);
+
+  // Re-render canvas when dependencies change (including image ready states)
+  useEffect(() => {
+    if (backdropReady && subjectReady) {
+      console.log('🎨 [Canvas] Rendering preview...');
+      renderCanvas();
+    }
+  }, [backdropReady, subjectReady, placement, blurBackground, masterAspectRatio, renderCanvas]);
+
+  // Canvas interaction handlers
+  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    setIsDragging(true);
+  };
+
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDragging) return;
+    
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const normalizedY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    
+    setPlacement(prev => ({
+      ...prev,
+      x: 0.5,
+      y: normalizedY
+    }));
+  };
+
+  const handleCanvasMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleCanvasTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    setIsDragging(true);
+  };
+
+  const handleCanvasTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isDragging) return;
+    e.preventDefault();
+    
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const normalizedY = Math.max(0, Math.min(1, (touch.clientY - rect.top) / rect.height));
+    
+    setPlacement(prev => ({
+      ...prev,
+      x: 0.5,
+      y: normalizedY
+    }));
+  };
+
+  const handleCanvasTouchEnd = () => {
+    setIsDragging(false);
+  };
   
   const setBackdropImage = async (file: File, fileUrl: string, source: 'upload' | 'library') => {
     setBackdrop(fileUrl);
     setBackdropFile(file);
-    
-    // Only set default y position on FIRST backdrop selection (when y is still at initial 0.85)
-    // Preserve user's placement if they've already adjusted it
-    // This respects user intent - no automatic position changes after initial setup
     
     toast({
       title: source === 'upload' ? "Backdrop Uploaded" : "Backdrop Selected",
@@ -276,7 +471,6 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   };
 
   const handleLibrarySelect = async (backdrop: any, imageUrl: string) => {
-    // imageUrl is a blob URL
     try {
       const response = await fetch(imageUrl);
       const blob = await response.blob();
@@ -290,7 +484,6 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
 
   const handleContinue = () => {
     if (backdrop) {
-      // Calculate the numeric aspect ratio for "original" mode
       let numericAspectRatio: number | undefined;
       if (masterAspectRatio === 'original' && backdropDimensions.w > 1 && backdropDimensions.h > 1) {
         numericAspectRatio = backdropDimensions.w / backdropDimensions.h;
@@ -306,94 +499,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     }
   };
 
-  // No artificial clamping - allow full vertical range [0, 1]
-  // User can position subject anywhere from top (y close to 0, may clip) to bottom (y=1)
-  // This gives complete freedom as requested by the user
-  const minYClamp = 0;
-
-  // --- Start CSS Preview Logic ---
-  const getPreviewStyles = () => {
-    if (!previewCutout) return {};
-    
-    // --- Calculate Dynamic Aspect Ratio ---
-    let aspectRatio = '4 / 3'; // Default
-    if (masterAspectRatio === '1:1') {
-      aspectRatio = '1 / 1';
-    } else if (masterAspectRatio === '3:4') {
-      aspectRatio = '3 / 4';
-    } else if (masterAspectRatio === '4:3') {
-      aspectRatio = '4 / 3';
-    } else if (masterAspectRatio === 'original') {
-      // Use backdrop's original dimensions for 'original' mode
-      if (backdropDimensions.w > 1 && backdropDimensions.h > 1) {
-        aspectRatio = `${backdropDimensions.w} / ${backdropDimensions.h}`;
-      } else if (subjectDimensions.w > 1 && subjectDimensions.h > 1) {
-        // Fallback to subject dimensions if backdrop dimensions unavailable
-        aspectRatio = `${subjectDimensions.w} / ${subjectDimensions.h}`;
-      }
-    }
-    
-    // Subject displays at original size within backdrop - user controls position freely
-    // Scale can be adjusted via placement.scale if needed
-    const subjectScale = placement.scale || 1.0;
-    
-    // Updated gradient stops to match canvas-utils (0.9 -> 0.15 opacity)
-    // "Long ramp" gradient: blur extends lower with subtle fade at 90%
-    const blurGradient = 'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 90%, rgba(0,0,0,0) 100%)';
-    
-    return {
-      // Container just sets the aspect ratio, no background
-      containerStyles: {
-        aspectRatio: aspectRatio,
-      },
-      // Sharp backdrop layer - ALWAYS at full opacity, covers entire area
-      sharpBackdropStyles: {
-        position: 'absolute' as const,
-        inset: 0,
-        backgroundImage: `url(${backdrop})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        zIndex: 0,
-      },
-      // Blurred backdrop layer - FULL HEIGHT with gradient alpha mask
-      // Blueprint: 9px blur (75% intensity) with "long ramp" gradient
-      // Blur extends to 90% of frame with subtle fade, keeping bottom edge sharp
-      backdropStyles: {
-        position: 'absolute' as const,
-        inset: 0, // Full height - gradient mask controls visibility
-        backgroundImage: `url(${backdrop})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        // Long ramp gradient: blur visible through most of frame, fading at 90%
-        maskImage: blurBackground ? blurGradient : 'none',
-        WebkitMaskImage: blurBackground ? blurGradient : 'none',
-        // Update pixel radius to match canvas (9px)
-        filter: blurBackground ? 'blur(9px)' : 'none',
-        zIndex: 1,
-      },
-      // Subject layer - NEVER blurred, on top of everything
-      // Width is set to 80% of container, full vertical movement range
-      // Positioning: placement.y represents the BOTTOM edge of the subject (0-1)
-      // y=0 means bottom at top (subject above container), y=1 means bottom at container bottom
-      // This matches the canvas compositor semantics in computeCompositeLayout
-      subjectStyles: {
-        width: '80%', // Subject fills 80% of backdrop width
-        height: 'auto',
-        position: 'absolute' as const,
-        // translateY(-100%) anchors at bottom edge, so subject's bottom is at top: y%
-        transform: 'translate(-50%, -100%)',
-        transformOrigin: 'center bottom',
-        left: `${placement.x * 100}%`,
-        top: `${placement.y * 100}%`,
-        zIndex: 10,
-      }
-    };
-  };
-  
-  const { containerStyles, backdropStyles, sharpBackdropStyles, subjectStyles } = getPreviewStyles();
-  // --- End CSS Preview Logic ---
+  const { width: canvasWidth, height: canvasHeight } = getCanvasDimensions();
 
   return (
     <div className="min-h-screen bg-background p-4">
@@ -561,12 +667,12 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
             </CardContent>
           </Card>
 
-          {/* Right Panel - Preview */}
+          {/* Right Panel - Live Canvas Preview */}
           <Card>
             <CardHeader>
               <CardTitle>Preview</CardTitle>
               <CardDescription>
-                Drag item vertically to set floor position.
+                Drag item vertically to set floor position. Canvas-rendered for pixel-perfect accuracy.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -595,68 +701,31 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <div
-                    className="relative w-full max-w-full overflow-hidden rounded-lg border-2 border-primary/50 touch-none"
-                    style={containerStyles}
-                    onMouseDown={() => setIsDragging(true)}
-                    onMouseMove={(e) => {
-                      if (!isDragging) return;
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      setPlacement(prev => ({
-                        ...prev,
-                        x: 0.5,
-                        // Clamp y between minYClamp (subject top at container top) and 1 (subject bottom at container bottom)
-                        y: Math.max(minYClamp, Math.min(1, (e.clientY - rect.top) / rect.height))
-                      }));
-                    }}
-                    onMouseUp={() => setIsDragging(false)}
-                    onMouseLeave={() => setIsDragging(false)}
-                    onTouchStart={() => setIsDragging(true)}
-                    onTouchMove={(e) => {
-                      if (!isDragging) return;
-                      e.preventDefault();
-                      const touch = e.touches[0];
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      setPlacement(prev => ({
-                        ...prev,
-                        x: 0.5,
-                        // Clamp y between minYClamp (subject top at container top) and 1 (subject bottom at container bottom)
-                        y: Math.max(minYClamp, Math.min(1, (touch.clientY - rect.top) / rect.height))
-                      }));
-                    }}
-                    onTouchEnd={() => setIsDragging(false)}
-                    onTouchCancel={() => setIsDragging(false)}
-                    data-testid="preview-container"
-                  >
-                    {/* Sharp backdrop layer (always visible underneath) */}
-                    <div style={sharpBackdropStyles} />
-                    
-                    {/* Blurred backdrop layer (overlays with gradient mask when enabled) */}
-                    {blurBackground && <div style={backdropStyles} />}
-                    
-                    {/* Main Subject - use Cloudinary shadow preview when available */}
-                    {/* This layer is NEVER blurred - rendered on top of backdrop */}
-                    <div
+                  <div className="relative">
+                    <canvas
+                      ref={canvasRef}
+                      width={canvasWidth}
+                      height={canvasHeight}
                       className={cn(
-                        "absolute cursor-grab select-none",
-                        isDragging && "cursor-grabbing"
+                        "rounded-lg border-2 border-primary/50 touch-none max-w-full",
+                        isDragging ? "cursor-grabbing" : "cursor-grab"
                       )}
-                      style={subjectStyles}
-                    >
-                      <img
-                        src={livePreviewUrl || previewCutout || ''}
-                        alt="Product Preview"
-                        className="w-full h-auto select-none"
-                        draggable={false}
-                        crossOrigin="anonymous"
-                      />
-                      {/* Show indicator when displaying shadow preview */}
-                      {livePreviewUrl && (
-                        <div className="absolute top-2 right-2 bg-primary/90 text-primary-foreground px-2 py-1 rounded text-xs font-medium">
-                          Live Shadow Preview
-                        </div>
-                      )}
-                    </div>
+                      onMouseDown={handleCanvasMouseDown}
+                      onMouseMove={handleCanvasMouseMove}
+                      onMouseUp={handleCanvasMouseUp}
+                      onMouseLeave={handleCanvasMouseUp}
+                      onTouchStart={handleCanvasTouchStart}
+                      onTouchMove={handleCanvasTouchMove}
+                      onTouchEnd={handleCanvasTouchEnd}
+                      onTouchCancel={handleCanvasTouchEnd}
+                      data-testid="preview-canvas"
+                      style={{ maxWidth: '100%', height: 'auto' }}
+                    />
+                    {livePreviewUrl && (
+                      <div className="absolute top-2 right-2 bg-primary/90 text-primary-foreground px-2 py-1 rounded text-xs font-medium">
+                        Live Shadow Preview
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
