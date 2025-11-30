@@ -10,6 +10,47 @@ import { processJob } from "./image-processing/process-job";
 import { processBackgroundRemoval } from "./workers/process-background-removal";
 import { eq, and } from "drizzle-orm";
 
+// In-memory job status cache to avoid database round-trips and survive connection issues
+// This is the PRIMARY source of truth during active processing
+interface JobCacheEntry {
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  finalImageUrl?: string;
+  errorMessage?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+const jobStatusCache = new Map<string, JobCacheEntry>();
+
+// Clean up old cache entries every 5 minutes (entries older than 30 minutes)
+const JOB_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+setInterval(() => {
+  const now = Date.now();
+  let cleaned = 0;
+  for (const [jobId, entry] of jobStatusCache.entries()) {
+    if (now - entry.createdAt > JOB_CACHE_TTL) {
+      jobStatusCache.delete(jobId);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`[JobCache] Cleaned up ${cleaned} expired job entries`);
+  }
+}, 5 * 60 * 1000);
+
+// Export cache update function for use in process-job.ts
+export function updateJobCache(jobId: string, status: JobCacheEntry['status'], finalImageUrl?: string, errorMessage?: string) {
+  const existing = jobStatusCache.get(jobId);
+  jobStatusCache.set(jobId, {
+    status,
+    finalImageUrl,
+    errorMessage,
+    createdAt: existing?.createdAt || Date.now(),
+    updatedAt: Date.now(),
+  });
+  console.log(`[JobCache] Updated job ${jobId}: status=${status}`);
+}
+
 // This function signature matches your original file
 export function registerRoutes(app: express.Application, storage: IStorage) {
 
@@ -134,10 +175,13 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
 
       const jobId = job.id;
 
-      // 2. Start the job in the background (DO NOT AWAIT)
+      // 2. Add to in-memory cache immediately for fast polling
+      updateJobCache(jobId, 'pending');
+
+      // 3. Start the job in the background (DO NOT AWAIT)
       processJob(jobId, db, original_image_url, processing_options);
 
-      // 3. Return 202 Accepted with the Job ID
+      // 4. Return 202 Accepted with the Job ID
       res.status(202).json({ jobId });
 
     } catch (err) {
@@ -147,14 +191,26 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
   });
 
   app.get("/api/job-status/:id", async (req: Request, res: Response) => {
-    const db = getDb();
     const jobId = req.params.id;
 
     if (!jobId) {
       return res.status(400).json({ error: 'Job ID is required' });
     }
 
+    // FIRST: Check in-memory cache (fast path, no database required)
+    const cachedJob = jobStatusCache.get(jobId);
+    if (cachedJob) {
+      console.log(`[JobStatus] Cache hit for job ${jobId}: status=${cachedJob.status}`);
+      return res.json({
+        status: cachedJob.status,
+        final_image_url: cachedJob.finalImageUrl,
+        error_message: cachedJob.errorMessage,
+      });
+    }
+
+    // FALLBACK: Check database (only if not in cache)
     try {
+      const db = getDb();
       const job = await db.query.imageJobs.findFirst({
         where: and(
           eq(imageJobs.id, jobId),
@@ -168,9 +224,12 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
       });
 
       if (!job) {
-        console.warn(`Job not found or permission error for job ${jobId}`);
+        console.warn(`[JobStatus] Job not found in cache or DB: ${jobId}`);
         return res.status(404).json({ error: 'Job not found' });
       }
+
+      // Populate cache from database for future requests
+      updateJobCache(jobId, job.status as any, job.finalImageUrl || undefined, job.errorMessage || undefined);
 
       // Map to snake_case for client compatibility
       res.json({
@@ -180,7 +239,8 @@ export function registerRoutes(app: express.Application, storage: IStorage) {
       });
 
     } catch (err) {
-      console.error(`Error fetching job status for ${jobId}:`, err);
+      console.error(`[JobStatus] Database error for job ${jobId}:`, err);
+      // If database fails but we don't have cache, return error
       res.status(500).json({ error: 'Failed to fetch job status' });
     }
   });

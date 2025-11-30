@@ -69,18 +69,44 @@ export const api = {
   },
 
   /**
-   * New: Polls for job status.
+   * Polls for job status with retry logic for connection issues.
+   * Uses exponential backoff on transient failures (connection drops, timeouts).
    */
   getJobStatus: async (
     jobId: string,
+    retryCount: number = 0,
   ): Promise<{
     status: 'pending' | 'processing' | 'completed' | 'failed';
     final_image_url?: string;
     error_message?: string;
   }> => {
-    return apiRequest(`/api/job-status/${jobId}`, {
-      method: 'GET',
-    });
+    const MAX_RETRIES = 3;
+    const BASE_DELAY = 1000; // 1 second
+    
+    try {
+      return await apiRequest(`/api/job-status/${jobId}`, {
+        method: 'GET',
+        timeout: 10000, // 10 second timeout for status checks
+      });
+    } catch (error: any) {
+      // Check if this is a transient error (connection drop, timeout, network error)
+      const isTransient = 
+        error.name === 'AbortError' ||
+        error.message?.includes('timeout') ||
+        error.message?.includes('network') ||
+        error.message?.includes('fetch') ||
+        error.message?.includes('connection');
+      
+      if (isTransient && retryCount < MAX_RETRIES) {
+        // Exponential backoff: 1s, 2s, 4s
+        const delay = BASE_DELAY * Math.pow(2, retryCount);
+        console.log(`[JobStatus] Retry ${retryCount + 1}/${MAX_RETRIES} for job ${jobId} after ${delay}ms`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return api.getJobStatus(jobId, retryCount + 1);
+      }
+      
+      throw error;
+    }
   },
 
   analyzeImages: (data: any) => apiRequest('/api/analyze-images', {

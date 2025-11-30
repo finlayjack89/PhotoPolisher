@@ -641,6 +641,9 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
     for (const job of activeJobs) {
       try {
         const statusResult = await api.getJobStatus(job.jobId);
+        // Reset consecutive error counter on success
+        (job as any).consecutiveErrors = 0;
+        
         if (statusResult.status !== job.status) {
           needsUpdate = true;
           job.status = statusResult.status;
@@ -659,12 +662,23 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
           }
         }
       } catch (error) {
-        console.error(`Error polling job ${job.jobId}:`, error);
-        job.status = 'failed';
-        job.error_message = (error as Error).message;
-        updateImageProgress(job.name, 'error', undefined, job.error_message);
-        setFailedImages(prev => [...prev.filter(f => f.name !== job.name), { name: job.name, error: job.error_message }]);
-        needsUpdate = true;
+        // Track consecutive errors - only fail job after 5 consecutive polling failures
+        const consecutiveErrors = ((job as any).consecutiveErrors || 0) + 1;
+        (job as any).consecutiveErrors = consecutiveErrors;
+        
+        console.warn(`[Polling] Error for job ${job.jobId} (attempt ${consecutiveErrors}/5):`, (error as Error).message);
+        
+        if (consecutiveErrors >= 5) {
+          console.error(`[Polling] Job ${job.jobId} failed after ${consecutiveErrors} consecutive errors`);
+          job.status = 'failed';
+          job.error_message = `Connection lost after ${consecutiveErrors} attempts: ${(error as Error).message}`;
+          updateImageProgress(job.name, 'error', undefined, job.error_message);
+          setFailedImages(prev => [...prev.filter(f => f.name !== job.name), { name: job.name, error: job.error_message }]);
+          needsUpdate = true;
+        } else {
+          // Don't fail yet - keep trying
+          updateImageProgress(job.name, 'shadowing', `Reconnecting... (attempt ${consecutiveErrors}/5)`);
+        }
       }
     }
 

@@ -4,6 +4,7 @@ import { imageJobs } from '../../shared/schema';
 import { eq } from 'drizzle-orm';
 import { addDropShadow } from './add-drop-shadow';
 import type { AddDropShadowRequest } from './add-drop-shadow';
+import { updateJobCache } from '../routes';
 
 // Define the shape of our options
 interface ProcessingOptions {
@@ -25,7 +26,9 @@ export async function processJob(
   options: ProcessingOptions,
 ) {
   try {
-    // 1. Set job to 'processing'
+    // 1. Set job to 'processing' - update cache FIRST for fast polling
+    updateJobCache(jobId, 'processing');
+    
     await db
       .update(imageJobs)
       .set({ status: 'processing' })
@@ -62,7 +65,9 @@ export async function processJob(
 
     console.log(`[Job ${jobId}] Shadow added. Job complete.`);
 
-    // 3. Update job to 'completed'
+    // 3. Update job to 'completed' - update cache FIRST for fast polling
+    updateJobCache(jobId, 'completed', shadowedSubjectUrl);
+    
     await db
       .update(imageJobs)
       .set({
@@ -73,12 +78,16 @@ export async function processJob(
 
   } catch (error) {
     console.error(`[Job ${jobId}] Processing failed:`, error);
-    // 4. Update job to 'failed'
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    
+    // 4. Update job to 'failed' - update cache FIRST for fast polling
+    updateJobCache(jobId, 'failed', undefined, errorMsg);
+    
     await db
       .update(imageJobs)
       .set({
         status: 'failed',
-        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        errorMessage: errorMsg,
       })
       .where(eq(imageJobs.id, jobId));
   }
