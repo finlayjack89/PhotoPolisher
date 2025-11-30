@@ -562,8 +562,10 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     // Apply the offset to find the new anchor position
     let newY = mouseY + dragOffsetRef.current;
     
-    // Clamp values to keep it reasonably on screen
-    newY = Math.max(0, Math.min(1, newY));
+    // Clamp with relaxed boundaries to allow pushing shadow padding off-canvas
+    // -0.5 allows dragging off the top, 1.5 allows pushing the bottom padding
+    // below the canvas edge so the visible product can touch the floor
+    newY = Math.max(-0.5, Math.min(1.5, newY));
     
     setPlacement(prev => ({
       ...prev,
