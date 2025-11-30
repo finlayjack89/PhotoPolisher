@@ -487,35 +487,39 @@ export async function compositeLayersV2(
       await drawReflection(ctx, cleanSubjectImg, adjustedReflectionRect, reflectionOptions, layout.canvasWidth);
     }
 
-    // --- NEW FEATURE: CONTACT SHADOW (Safe Mode) ---
+    // --- NEW FEATURE: CONTACT SHADOW (Grounding) ---
     try {
       const footprint = generateContactShadow(cleanSubjectImg);
       
       if (footprint) {
         ctx.save();
         try {
-          // Configuration for "Grounding" Look
-          const shadowH = layout.productRect.height * 0.15; // Squash to 15% height
+          const SQUASH_FACTOR = 0.15;
+          const SHADOW_OPACITY = 0.5;
+          const BASE_BLUR_PX = 12;
+          
           const shadowW = layout.productRect.width;
+          const shadowH = layout.productRect.height * SQUASH_FACTOR;
           
-          // Position: Aligned with bottom, tucked slightly underneath
-          // (shadowH * 0.6) moves the dark center under the object
-          const shadowY = productY + layout.productRect.height - (shadowH * 0.6);
           const shadowX = layout.productRect.x;
+          const shadowY = (layout.productRect.y + layout.productRect.height) - (shadowH * 0.6);
 
-          // Dynamic contact shadow blur scaling: 8px base at 3000px reference
-          const scaledShadowBlur = getScaledValue(8, layout.canvasWidth);
-          console.log(`🌑 [Contact Shadow] Blur scaling: ${scaledShadowBlur.toFixed(2)}px (base: 8px, canvasWidth: ${layout.canvasWidth}px)`);
+          const scaledBlur = getScaledValue(BASE_BLUR_PX, layout.canvasWidth);
           
-          ctx.filter = `blur(${scaledShadowBlur}px)`; 
-          ctx.globalAlpha = 0.4;    
+          console.log(`🌑 [Contact Shadow] Generating:`, {
+            dims: `${Math.round(shadowW)}x${Math.round(shadowH)}`,
+            blur: `${scaledBlur.toFixed(1)}px`,
+            y: Math.round(shadowY)
+          });
+          
+          ctx.filter = `blur(${scaledBlur}px)`; 
+          ctx.globalAlpha = SHADOW_OPACITY;
+          ctx.globalCompositeOperation = 'source-over';
           
           ctx.drawImage(footprint, shadowX, shadowY, shadowW, shadowH);
-          
-          console.log('🌑 [Contact Shadow] Applied grounding effect');
         } finally {
-          ctx.restore(); // CRITICAL: Always reset state even if error occurs
-          cleanupCanvas(footprint); // Clean up footprint canvas to reclaim memory
+          ctx.restore();
+          cleanupCanvas(footprint);
         }
       }
     } catch (err) {

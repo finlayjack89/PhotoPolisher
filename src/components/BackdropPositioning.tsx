@@ -490,6 +490,51 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         placement
       );
       
+      // --- LIVE PREVIEW: CONTACT SHADOW ---
+      if (subjectImgRef.current) {
+        const tempCanvas = document.createElement('canvas');
+        const maxDimension = Math.max(subjectImgRef.current.naturalWidth, subjectImgRef.current.naturalHeight);
+        const scale = Math.min(1, 300 / maxDimension); 
+        tempCanvas.width = subjectImgRef.current.naturalWidth * scale;
+        tempCanvas.height = subjectImgRef.current.naturalHeight * scale;
+        
+        const tempCtx = tempCanvas.getContext('2d');
+        if (tempCtx) {
+          tempCtx.drawImage(subjectImgRef.current, 0, 0, tempCanvas.width, tempCanvas.height);
+          tempCtx.globalCompositeOperation = 'source-in';
+          tempCtx.fillStyle = '#000000';
+          tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+          
+          ctx.save();
+          
+          const SQUASH_FACTOR = 0.15; 
+          const SHADOW_OPACITY = 0.5;
+          const BASE_BLUR_PX = 12;
+          
+          const previewBlur = (BASE_BLUR_PX * width) / 3000; 
+          
+          const shadowH = layout.productRect.height * SQUASH_FACTOR;
+          const shadowY = (layout.productRect.y + layout.productRect.height) - (shadowH * 0.6);
+          
+          ctx.filter = `blur(${Math.max(0.5, previewBlur)}px)`;
+          ctx.globalAlpha = SHADOW_OPACITY;
+          
+          ctx.drawImage(
+            tempCanvas, 
+            layout.productRect.x, 
+            shadowY, 
+            layout.productRect.width, 
+            shadowH
+          );
+          
+          ctx.restore();
+          
+          tempCanvas.width = 0; 
+          tempCanvas.height = 0;
+        }
+      }
+      // ------------------------------------
+
       // Draw subject at calculated position
       // Use shadowedSubjectRect when we have shadow image, productRect otherwise
       if (hasShadowImage) {
