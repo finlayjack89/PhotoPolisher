@@ -5,13 +5,14 @@ import { generateSmartReflection } from './reflection-utils';
 /**
  * Applies a realistic f/2.8 depth of field effect with a gradual floor ramp.
  * Configured for "75% intensity" (9px) and "starts lower" logic (0.9 stop).
+ * Exported for use in Live Canvas Preview to ensure WYSIWYG accuracy.
  */
-const applyDepthOfField = (
+export function applyDepthOfField(
   ctx: CanvasRenderingContext2D, 
   image: HTMLImageElement, 
   width: number, 
   height: number
-) => {
+): void {
   const blurCanvas = document.createElement('canvas');
   blurCanvas.width = width;
   blurCanvas.height = height;

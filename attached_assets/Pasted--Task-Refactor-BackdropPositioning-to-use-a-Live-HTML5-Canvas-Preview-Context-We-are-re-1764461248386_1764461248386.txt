@@ -1,0 +1,40 @@
+**Task:** Refactor `BackdropPositioning` to use a Live HTML5 Canvas Preview.
+
+**Context:**
+We are replacing the CSS-based preview with a Canvas-based preview to ensure "What You See Is What You Get" accuracy for the batch processing pipeline.
+
+**Phase 1: Update Utilities**
+Open `src/lib/canvas-utils.ts`.
+1. Locate the `applyDepthOfField` function.
+2. Export this function (remove the `const` declaration or add `export` before it) so it can be imported in components.
+3. Ensure it accepts `(ctx, image, width, height)` as arguments.
+
+**Phase 2: Refactor BackdropPositioning**
+Open `src/components/BackdropPositioning.tsx`.
+Completely replace the render logic and the CSS styling methods (`getPreviewStyles`) with a Canvas implementation.
+
+**Requirements:**
+1.  **Canvas Setup:**
+    * Use a `<canvas ref={canvasRef} />` element instead of the `div` container.
+    * Maintain a `backdropCanvasRef` (offscreen buffer) to cache the backdrop + blur. Only redraw this buffer when `backdrop` or `blurBackground` changes.
+    * Maintain `subjectImgRef` and `backdropImgRef` to hold loaded HTMLImageElements.
+
+2.  **Rendering Logic (in a useEffect):**
+    * On every render (or `placement` change), get the 2D context of the main canvas.
+    * Draw the `backdropCanvasRef` (buffer) first.
+    * Use `computeCompositeLayout` (imported from `canvas-utils`) to calculate the subject's `x, y, width, height`.
+        * *Crucial:* Pass the *Canvas Display Dimensions* (e.g., 800x600) into `computeCompositeLayout`, not the original image dimensions. This scales the math down to the preview size automatically.
+    * Draw the subject image at the calculated coordinates.
+
+3.  **Interaction (Drag & Drop):**
+    * Implement `onMouseDown`, `onMouseMove`, `onMouseUp` on the canvas.
+    * Calculate mouse movement relative to the canvas height.
+    * Update `setPlacement(prev => ({ ...prev, y: newY }))`.
+    * Ensure `newY` is normalized (0.0 to 1.0).
+
+4.  **Visual Parity:**
+    * The preview must show the **exact** same blur (9px radius, gradient mask) as the batch processor.
+    * Do **not** render reflections or contact shadows in this preview (per requirements).
+
+**Code Structure:**
+Please write the complete, updated `BackdropPositioning.tsx` component. Ensure all imports (like `Loader2`, `Move`, `computeCompositeLayout`) are preserved.
