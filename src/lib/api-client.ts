@@ -69,8 +69,9 @@ export const api = {
   },
 
   /**
-   * Polls for job status with retry logic for connection issues.
+   * Polls for job status with robust retry logic for connection issues.
    * Uses exponential backoff on transient failures (connection drops, timeouts).
+   * Extended retry count to handle Vite HMR restarts and network turbulence.
    */
   getJobStatus: async (
     jobId: string,
@@ -80,13 +81,14 @@ export const api = {
     final_image_url?: string;
     error_message?: string;
   }> => {
-    const MAX_RETRIES = 3;
-    const BASE_DELAY = 1000; // 1 second
+    const MAX_RETRIES = 5; // Increased from 3 to handle longer outages
+    const BASE_DELAY = 500; // Start with shorter delay
+    const MAX_DELAY = 5000; // Cap at 5 seconds
     
     try {
       return await apiRequest(`/api/job-status/${jobId}`, {
         method: 'GET',
-        timeout: 10000, // 10 second timeout for status checks
+        timeout: 15000, // 15 second timeout for status checks (increased for stability)
       });
     } catch (error: any) {
       // Check if this is a transient error (connection drop, timeout, network error)
@@ -95,12 +97,14 @@ export const api = {
         error.message?.includes('timeout') ||
         error.message?.includes('network') ||
         error.message?.includes('fetch') ||
-        error.message?.includes('connection');
+        error.message?.includes('connection') ||
+        error.message?.includes('Failed to fetch') ||
+        error.message?.includes('ERR_');
       
       if (isTransient && retryCount < MAX_RETRIES) {
-        // Exponential backoff: 1s, 2s, 4s
-        const delay = BASE_DELAY * Math.pow(2, retryCount);
-        console.log(`[JobStatus] Retry ${retryCount + 1}/${MAX_RETRIES} for job ${jobId} after ${delay}ms`);
+        // Exponential backoff with jitter and cap: 500ms, 1s, 2s, 4s, 5s
+        const delay = Math.min(BASE_DELAY * Math.pow(2, retryCount) + Math.random() * 200, MAX_DELAY);
+        console.log(`[JobStatus] Retry ${retryCount + 1}/${MAX_RETRIES} for job ${jobId} after ${Math.round(delay)}ms`);
         await new Promise(resolve => setTimeout(resolve, delay));
         return api.getJobStatus(jobId, retryCount + 1);
       }

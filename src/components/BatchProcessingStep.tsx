@@ -644,6 +644,13 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
         // Reset consecutive error counter on success
         (job as any).consecutiveErrors = 0;
         
+        // If job was in "reconnecting" state, it recovered - update status
+        const wasReconnecting = (job as any).isReconnecting;
+        if (wasReconnecting) {
+          (job as any).isReconnecting = false;
+          console.log(`[Polling] Job ${job.jobId} recovered from connection issues`);
+        }
+        
         if (statusResult.status !== job.status) {
           needsUpdate = true;
           job.status = statusResult.status;
@@ -662,23 +669,20 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
           }
         }
       } catch (error) {
-        // Track consecutive errors - only fail job after 5 consecutive polling failures
+        // Track consecutive errors - use soft failure with much longer tolerance
+        // Jobs should NEVER be marked failed due to transient connection issues
         const consecutiveErrors = ((job as any).consecutiveErrors || 0) + 1;
         (job as any).consecutiveErrors = consecutiveErrors;
+        (job as any).isReconnecting = true;
         
-        console.warn(`[Polling] Error for job ${job.jobId} (attempt ${consecutiveErrors}/5):`, (error as Error).message);
+        console.warn(`[Polling] Transient error for job ${job.jobId} (attempt ${consecutiveErrors}):`, (error as Error).message);
         
-        if (consecutiveErrors >= 5) {
-          console.error(`[Polling] Job ${job.jobId} failed after ${consecutiveErrors} consecutive errors`);
-          job.status = 'failed';
-          job.error_message = `Connection lost after ${consecutiveErrors} attempts: ${(error as Error).message}`;
-          updateImageProgress(job.name, 'error', undefined, job.error_message);
-          setFailedImages(prev => [...prev.filter(f => f.name !== job.name), { name: job.name, error: job.error_message }]);
-          needsUpdate = true;
-        } else {
-          // Don't fail yet - keep trying
-          updateImageProgress(job.name, 'shadowing', `Reconnecting... (attempt ${consecutiveErrors}/5)`);
+        // Only show warning after 3 consecutive errors, never mark as failed
+        // The job will eventually succeed when the server recovers
+        if (consecutiveErrors >= 3) {
+          updateImageProgress(job.name, 'shadowing', `Reconnecting... (${consecutiveErrors} attempts)`);
         }
+        // We explicitly do NOT mark the job as failed here - keep polling
       }
     }
 
