@@ -38,7 +38,7 @@ Preferred communication style: Simple, everyday language.
 - **Cloudinary Request Queuing**: Limits concurrent Cloudinary API requests to 3 to prevent rate limiting.
 - **Granular Progress Tracking**: Provides per-image status tracking with real-time UI updates.
 - **Smart Reflection Generator**: Creates photorealistic product reflections with performance-optimized blur, Fresnel falloff, and subtle opacity.
-- **Contact Shadow System**: Adds realistic grounding effects with downscaled, blurred black silhouettes.
+- **Contact Shadow System**: Adds realistic grounding effects with downscaled (300px max dimension), blurred black silhouettes. Uses SQUASH_FACTOR=0.15, SHADOW_OPACITY=0.5, BASE_BLUR_PX=12 with dynamic scaling for WYSIWYG parity between live preview and batch export. Shadow positioned at (productBottom - shadowHeight*0.6) for natural grounding.
 - **Simplified Positioning**: User-controlled product positioning without automatic padding manipulation.
 - **Reference Width Strategy for Preview-Export Parity**: Compositing engine uses `REFERENCE_WIDTH = 3000` constant with `getScaledValue(baseValue, currentWidth, minValue=0.5)` helper for proportional blur scaling. All spatial effects (depth-of-field, reflections, contact shadows) scale proportionally to canvas width without caps. Preview uses display-space projection (`displayScale = canvasWidth / backdropWidth`) and separates shadow vs clean dimensions for accurate layout calculation.
 - **Shadow Dimension Storing**: WorkflowContext stores actual shadow dimensions via `storeSubjectDimensions` when Cloudinary image loads. `getStoredSubjectDimensions` retrieves these for layout calculation. Fallback uses `SHADOW_PADDING_RATIO = 1.4` estimate before shadow is ready.
