@@ -1,3 +1,12 @@
+/**
+ * Drop Shadow Generation using Cloudinary API
+ * 
+ * REFACTORED: Now supports URL-based file handling.
+ * - Files can be passed via URLs (preferred) or base64 (legacy)
+ * - Cloudinary accepts URLs directly for upload, avoiding base64 overhead
+ * - Results are stored as files and returned with file IDs
+ */
+
 import fetch from 'node-fetch';
 import FormData from 'form-data';
 import crypto from 'crypto';
@@ -5,6 +14,7 @@ import type { IStorage } from '../storage';
 import { fetchWithTimeout, retryWithBackoff } from '../utils/fetch-utils';
 import { calculateTimeout, getImageSizeFromBase64 } from '../utils/timeout-utils';
 import { processQueue } from '../utils/queue-utils';
+import { getPublicFileUrl } from '../utils/url-utils';
 
 export interface AddDropShadowRequest {
   images?: Array<{
@@ -36,7 +46,7 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
     throw new Error('Cloudinary credentials not configured');
   }
 
-  const { images, fileIds, uploadPreview, image, azimuth = 0, elevation = 90, spread = 5, opacity = 75 } = req; // <-- ADDED opacity
+  const { images, fileIds, uploadPreview, image, azimuth = 0, elevation = 90, spread = 5, opacity = 75 } = req;
 
   // Handle preview upload
   if (uploadPreview && image) {
@@ -54,11 +64,9 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
     uploadData.append('signature', uploadSignature);
     uploadData.append('folder', folder);
 
-    // Calculate timeout based on image size
     const previewImageSize = getImageSizeFromBase64(image.data);
     const uploadTimeout = calculateTimeout('upload', previewImageSize);
 
-    // Use timeout and retry logic for preview upload
     const uploadResponse = await retryWithBackoff(
       () => fetchWithTimeout(
         `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
@@ -85,61 +93,78 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
     };
   }
 
-  // Convert fileIds to images array if provided
-  let imagesToProcess: Array<{ data: string; name: string }> = [];
+  // Build the list of images to process
+  interface ImageToProcess {
+    data?: string;
+    fileId?: string;
+    publicUrl?: string;
+    name: string;
+    sizeBytes?: number;
+  }
   
+  let imagesToProcess: ImageToProcess[] = [];
+  
+  // URL-based approach using file IDs (preferred - non-blocking)
   if (fileIds && Array.isArray(fileIds) && fileIds.length > 0) {
     if (!storage) {
       throw new Error('Storage instance required when using fileIds');
     }
     
-    console.log(`📁 Loading ${fileIds.length} images from storage by fileId...`);
+    console.log(`🚀 [URL Mode] Loading ${fileIds.length} images from storage by fileId...`);
     
     for (const { fileId, name } of fileIds) {
       try {
+        // Get file metadata without loading the full buffer
         const fileData = await storage.getFile(fileId);
         
         if (!fileData) {
           console.error(`File not found for fileId: ${fileId}`);
           imagesToProcess.push({
-            data: '',
             name: name || 'unknown',
           });
           continue;
         }
         
-        const base64Data = `data:${fileData.file.mimeType};base64,${fileData.buffer.toString('base64')}`;
+        // Use public URL instead of loading buffer into memory
+        const publicUrl = getPublicFileUrl(fileId);
+        
         imagesToProcess.push({
-          data: base64Data,
+          publicUrl,
+          fileId,
           name: name || fileData.file.originalFilename || 'image',
+          sizeBytes: fileData.file.bytes,
         });
         
-        console.log(`✅ Loaded ${name} from storage (${fileData.buffer.length} bytes)`);
+        console.log(`✅ Prepared ${name} for URL-based upload (${fileData.file.bytes} bytes)`);
       } catch (error) {
         console.error(`Failed to load file ${fileId}:`, error);
         imagesToProcess.push({
-          data: '',
           name: name || 'unknown',
         });
       }
     }
   } else if (images && Array.isArray(images) && images.length > 0) {
-    // Fallback to legacy base64 data approach
-    imagesToProcess = images;
+    // Legacy base64 data approach
+    console.log(`⚠️ [Legacy Mode] Processing ${images.length} images via base64...`);
+    imagesToProcess = images.map(img => ({
+      data: img.data,
+      name: img.name,
+      sizeBytes: getImageSizeFromBase64(img.data),
+    }));
   } else {
     throw new Error('No images or fileIds provided');
   }
 
+  // Calculate and validate total batch size
   const MAX_BATCH_SIZE = 300 * 1024 * 1024;
   let totalBatchSize = 0;
   
   for (const img of imagesToProcess) {
-    if (img.data) {
-      // Normalize base64 string: strip data URL prefix and whitespace before calculating
+    if (img.sizeBytes) {
+      totalBatchSize += img.sizeBytes;
+    } else if (img.data) {
       const base64Data = img.data.replace(/^data:image\/[a-z]+;base64,/, '').replace(/\s/g, '');
-      // Base64 is ~33% larger than actual binary, so multiply by 0.75 to get actual size
-      const estimatedSize = base64Data.length * 0.75;
-      totalBatchSize += estimatedSize;
+      totalBatchSize += base64Data.length * 0.75;
     }
   }
   
@@ -160,8 +185,8 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
     imagesToProcess,
     async (img, index) => {
       try {
-        // Skip if no data (file not found)
-        if (!img.data) {
+        // Skip if no data and no URL (file not found)
+        if (!img.data && !img.publicUrl) {
           return {
             name: img.name,
             shadowedData: '',
@@ -177,20 +202,26 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
         const uploadSignature = await generateSignature(signatureString, apiSecret);
 
         const uploadData = new FormData();
-        uploadData.append('file', img.data);
+        
+        // Use URL if available (preferred), otherwise fall back to base64
+        if (img.publicUrl) {
+          console.log(`📤 Uploading ${img.name} to Cloudinary via URL: ${img.publicUrl}`);
+          uploadData.append('file', img.publicUrl);
+        } else if (img.data) {
+          console.log(`📤 Uploading ${img.name} to Cloudinary via base64...`);
+          uploadData.append('file', img.data);
+        }
+        
         uploadData.append('api_key', apiKey);
         uploadData.append('timestamp', timestamp.toString());
         uploadData.append('signature', uploadSignature);
         uploadData.append('folder', folder);
 
-        console.log(`Uploading ${img.name} to Cloudinary with signed upload...`);
-
         // Calculate timeout based on image size
-        const imageSize = getImageSizeFromBase64(img.data);
+        const imageSize = img.sizeBytes || (img.data ? getImageSizeFromBase64(img.data) : 5 * 1024 * 1024);
         const uploadTimeout = calculateTimeout('upload', imageSize);
 
         const uploadStartTime = Date.now();
-        // Use timeout and retry logic for image upload
         const uploadResponse = await retryWithBackoff(
           () => fetchWithTimeout(
             `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
@@ -216,16 +247,13 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
         const paddingMultiplier = Math.max(1.5, 1 + (spread / 100));
         console.log(`Using padding multiplier: ${paddingMultiplier}x for spread: ${spread}`);
 
-        // Added opacity (co_rgb:000,o_OPACITY) to the drop shadow effect
         const transformedUrl = `https://res.cloudinary.com/${cloudName}/image/upload/c_lpad,w_iw_mul_${paddingMultiplier},h_ih_mul_${paddingMultiplier},b_transparent/e_dropshadow:azimuth_${azimuth};elevation_${elevation};spread_${spread},co_rgb:000,o_${opacity}/${uploadResult.public_id}.png`;
 
         console.log(`Transformation URL: ${transformedUrl}`);
 
-        // Calculate timeout for shadow transformation (reuse imageSize from upload)
         const shadowTimeout = calculateTimeout('shadow', imageSize);
 
         const transformStartTime = Date.now();
-        // Use timeout and retry logic for transformed image fetch
         const transformedResponse = await retryWithBackoff(
           () => fetchWithTimeout(transformedUrl, {}, shadowTimeout, `Cloudinary transform: ${img.name}`)
         );
@@ -235,13 +263,12 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
         }
 
         const transformedBuffer = await transformedResponse.arrayBuffer();
-        const base64 = Buffer.from(transformedBuffer).toString('base64');
         const transformMs = Math.round(Date.now() - transformStartTime);
 
-        const shadowedDataUrl = `data:image/png;base64,${base64}`;
-
-        // Store shadowedData as file for file ID architecture (Phase 1 optimization)
+        // Store shadowedData as file for file ID architecture
         let shadowedFileId: string | undefined;
+        let shadowedDataUrl: string | undefined;
+        
         if (storage) {
           try {
             const buffer = Buffer.from(transformedBuffer);
@@ -258,12 +285,19 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
             console.log(`💾 Stored shadow as file: ${shadowedFileId} (${buffer.length} bytes)`);
           } catch (storageError) {
             console.warn(`Failed to store shadow as file for ${img.name}:`, storageError);
+            // Fall back to base64
+            const base64 = Buffer.from(transformedBuffer).toString('base64');
+            shadowedDataUrl = `data:image/png;base64,${base64}`;
           }
+        } else {
+          // No storage - return base64
+          const base64 = Buffer.from(transformedBuffer).toString('base64');
+          shadowedDataUrl = `data:image/png;base64,${base64}`;
         }
 
         console.log(`✅ Successfully added shadow to ${img.name}`);
 
-        // Cleanup
+        // Cleanup temporary Cloudinary image
         const cleanupStartTime = Date.now();
         let cleanupMs = 0;
         try {
@@ -277,7 +311,6 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
           deleteData.append('api_key', apiKey);
           deleteData.append('timestamp', deleteTimestamp.toString());
 
-          // Use timeout for cleanup (no retry needed for cleanup)
           const cleanupTimeout = calculateTimeout('download');
           const deleteResponse = await fetchWithTimeout(
             `https://api.cloudinary.com/v1_1/${cloudName}/image/destroy`,
@@ -303,14 +336,14 @@ export async function addDropShadow(req: AddDropShadowRequest, storage?: IStorag
 
         return {
           name: img.name,
-          shadowedData: shadowedDataUrl,
+          shadowedData: shadowedDataUrl || '',
           shadowedFileId,
         };
       } catch (imageError) {
         console.error(`Failed to process ${img.name}:`, imageError);
         return {
           name: img.name,
-          shadowedData: img.data,
+          shadowedData: img.data || '',
           shadowedFileId: undefined,
           error: imageError instanceof Error ? imageError.message : 'Unknown error',
         };
