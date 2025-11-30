@@ -1,0 +1,134 @@
+Task: Implement "Grounding Contact Shadow" with Dynamic Scaling & Parity
+
+We are replacing the placeholder shadow logic with a photorealistic Contact Shadow (Ambient Occlusion). This shadow must "ground" the subject to the floor, preventing the floating effect. Crucially, it must use the new REFERENCE_WIDTH scaling architecture to ensuring the Live Preview (600px) and Batch Export (3000px) look identical pixel-for-pixel.
+
+1. Modify src/lib/canvas-utils.ts
+Locate the compositeLayersV2 function. Replace the existing "CONTACT SHADOW (Safe Mode)" block (approx lines 437-465) with the following implementation.
+
+Technical Requirements:
+
+Squash Factor: 0.15 (15% of height). This flattens the subject's silhouette into a floor perspective.
+
+Vertical Offset: The shadow density must be tucked under the subject. Calculate Y as bottom_edge - (shadow_height * 0.6).
+
+Dynamic Blur: Do not use fixed pixels. Use getScaledValue(12, layout.canvasWidth) to scale a 12px base blur relative to the canvas resolution.
+
+Layering: Draw this after the Reflection but before the Clean Product.
+
+Code to Insert:
+
+TypeScript
+
+    // --- NEW FEATURE: CONTACT SHADOW (Grounding) ---
+    // Generates a squashed ambient occlusion shadow to ground the subject
+    try {
+      const footprint = generateContactShadow(cleanSubjectImg);
+      
+      if (footprint) {
+        ctx.save();
+        
+        // 1. Configuration for Grounding
+        const SQUASH_FACTOR = 0.15; // 15% height for flat perspective
+        const SHADOW_OPACITY = 0.5; // Main intensity
+        const BASE_BLUR_PX = 12;    // Calibrated for 3000px width reference
+        
+        // 2. Calculate Geometry relative to the CLEAN PRODUCT 
+        // (We use the clean product rect, not the padded shadow layer)
+        const shadowW = layout.productRect.width;
+        const shadowH = layout.productRect.height * SQUASH_FACTOR;
+        
+        // 3. Position: Centered on the baseline
+        // We position the shadow so its vertical center aligns with the subject's bottom edge
+        const shadowX = layout.productRect.x;
+        // The 0.6 offset pushes the shadow slightly UP so the subject stands IN it, not ON it
+        const shadowY = (layout.productRect.y + layout.productRect.height) - (shadowH * 0.6); 
+
+        // 4. Dynamic Blur Scaling (Pixel-Perfect Parity)
+        // This ensures a 12px blur at 3000px becomes ~2.4px at 600px
+        const scaledBlur = getScaledValue(BASE_BLUR_PX, layout.canvasWidth);
+        
+        console.log(`🌑 [Contact Shadow] Generating:`, {
+          dims: `${Math.round(shadowW)}x${Math.round(shadowH)}`,
+          blur: `${scaledBlur.toFixed(1)}px`,
+          y: Math.round(shadowY)
+        });
+
+        // 5. Draw
+        ctx.filter = `blur(${scaledBlur}px)`; 
+        ctx.globalAlpha = SHADOW_OPACITY;
+        ctx.globalCompositeOperation = 'source-over'; // Draw on top of reflection, below subject
+        
+        ctx.drawImage(footprint, shadowX, shadowY, shadowW, shadowH);
+        
+        ctx.restore();
+        cleanupCanvas(footprint);
+      }
+    } catch (err) {
+      console.warn('⚠️ Skipping contact shadow due to error:', err);
+    }
+2. Modify src/components/BackdropPositioning.tsx
+We must mirror this logic in the Live Preview so the user sees the grounding effect while dragging.
+
+Locate the renderCanvas function. Inside the block where subjectImgRef.current is drawn (approx line 475), insert this new logic BEFORE the subject is drawn.
+
+Code to Insert:
+
+TypeScript
+
+      // ... previous code calculating displayShadowW, displayCleanW etc ...
+
+      // --- LIVE PREVIEW: CONTACT SHADOW ---
+      if (subjectImgRef.current) {
+        // Create a lightweight silhouette canvas
+        const tempCanvas = document.createElement('canvas');
+        // Optimization: Use small canvas for silhouette generation to keep 60fps
+        const scale = Math.min(1, 300 / subjectImgRef.current.naturalWidth); 
+        tempCanvas.width = subjectImgRef.current.naturalWidth * scale;
+        tempCanvas.height = subjectImgRef.current.naturalHeight * scale;
+        
+        const tempCtx = tempCanvas.getContext('2d');
+        if (tempCtx) {
+          // Generate Black Silhouette
+          tempCtx.drawImage(subjectImgRef.current, 0, 0, tempCanvas.width, tempCanvas.height);
+          tempCtx.globalCompositeOperation = 'source-in';
+          tempCtx.fillStyle = '#000000';
+          tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+          
+          ctx.save();
+          
+          // Match the Batch Config for WYSIWYG accuracy:
+          const SQUASH_FACTOR = 0.15; 
+          const SHADOW_OPACITY = 0.5;
+          const BASE_BLUR_PX = 12; // Base for 3000px
+          
+          // Calculate Dynamic Blur for Preview Window
+          // Formula: scaledBlur = BaseBlur * (CurrentCanvasWidth / ReferenceWidth)
+          const previewBlur = (BASE_BLUR_PX * width) / 3000; 
+          
+          const shadowH = layout.productRect.height * SQUASH_FACTOR;
+          const shadowY = (layout.productRect.y + layout.productRect.height) - (shadowH * 0.6);
+          
+          ctx.filter = `blur(${Math.max(0.5, previewBlur)}px)`;
+          ctx.globalAlpha = SHADOW_OPACITY;
+          
+          // Draw Shadow using calculated layout
+          ctx.drawImage(
+            tempCanvas, 
+            layout.productRect.x, 
+            shadowY, 
+            layout.productRect.width, 
+            shadowH
+          );
+          
+          ctx.restore();
+          
+          // Cleanup
+          tempCanvas.width = 0; 
+          tempCanvas.height = 0;
+        }
+      }
+      // ------------------------------------
+
+      // [Existing code: Draw subject at calculated position...]
+      if (hasShadowImage) {
+         // ...
