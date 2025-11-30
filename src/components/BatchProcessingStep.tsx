@@ -10,7 +10,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { Loader2, ArrowLeft, CheckCircle, AlertCircle, Wand2, RefreshCw, Upload, Moon, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { api } from "@/lib/api-client";
+import { api, getCanvasImageData } from "@/lib/api-client";
 import { 
   SubjectPlacement, 
   compositeLayersV2,
@@ -525,9 +525,23 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
         // --- Step 1: Get Cutout Data (prefer deskewed versions if rotation was applied) ---
         // Only use deskewed data if rotation confidence >= 75
         const wasRotated = subject.rotationConfidence && subject.rotationConfidence >= 75;
-        const cleanCutoutData = isPreCut
-          ? (wasRotated && subject.cleanDeskewedData) || subject.originalData || ''
-          : (wasRotated && subject.deskewedData) || subject.backgroundRemovedData || '';
+        
+        // Lazy-load image data using getCanvasImageData for URL-first flow
+        let cleanCutoutData: string;
+        if (isPreCut) {
+          cleanCutoutData = (wasRotated && subject.cleanDeskewedData) || subject.originalData || '';
+        } else {
+          // Check if we have deskewed data first
+          if (wasRotated && subject.deskewedData) {
+            cleanCutoutData = subject.deskewedData;
+          } else {
+            // Lazy-load from URL if backgroundRemovedData is empty
+            cleanCutoutData = await getCanvasImageData({
+              backgroundRemovedUrl: subject.backgroundRemovedUrl,
+              backgroundRemovedData: subject.backgroundRemovedData,
+            });
+          }
+        }
 
         // Log which version is being used
         if (wasRotated) {

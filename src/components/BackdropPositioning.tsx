@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { SubjectPlacement, getImageDimensions, computeCompositeLayout, applyDepthOfField, REFERENCE_WIDTH } from "@/lib/canvas-utils";
 import { fileToDataUrl } from "@/lib/file-utils";
+import { getDisplayImageSrc } from "@/lib/api-client";
 import { useToast } from "@/hooks/use-toast";
 import { BackdropLibrary } from "@/components/BackdropLibrary";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -145,19 +146,18 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
           const subject = firstSubject as ProcessedSubject;
           const wasRotated = subject.rotationConfidence && subject.rotationConfidence >= 75;
           
-          // Try URL first for efficiency, fallback to data URL
+          // Try URL first for efficiency, fallback to data URL using getDisplayImageSrc helper
           if (wasRotated && subject.deskewedData) {
             cutoutData = subject.deskewedData;
             console.log(`✅ Preview using rotated image for ${subject.name} (confidence: ${subject.rotationConfidence}%)`);
-          } else if (subject.backgroundRemovedUrl) {
-            cutoutData = subject.backgroundRemovedUrl;
-            console.log(`📐 Preview using URL for ${subject.name}`);
           } else {
-            cutoutData = subject.backgroundRemovedData;
+            // Use getDisplayImageSrc for URL-first approach with data fallback
+            cutoutData = getDisplayImageSrc(subject);
+            const source = subject.backgroundRemovedUrl ? 'URL' : 'data URL';
             const reason = subject.rotationConfidence !== undefined && subject.rotationConfidence < 75 
               ? `low confidence (${subject.rotationConfidence}%)` 
               : 'no rotation available';
-            console.log(`📐 Preview using data URL for ${subject.name} (${reason})`);
+            console.log(`📐 Preview using ${source} for ${subject.name} (${reason})`);
           }
         }
 

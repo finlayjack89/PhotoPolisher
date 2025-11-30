@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { AlertCircle, ArrowLeft, ArrowRight, Loader2, Scissors, Download } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { createBackgroundRemovalJob, getBackgroundRemovalJobStatus, uploadFile } from "@/lib/api-client";
+import { createBackgroundRemovalJob, getBackgroundRemovalJobStatus, uploadFile, getDisplayImageSrc } from "@/lib/api-client";
 import { useToast } from "@/hooks/use-toast";
 
 interface BackgroundRemovalStepProps {
@@ -93,8 +93,8 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
           setCurrentProcessingStep('Finalizing results...');
           
           // Step 4: Convert results to ProcessedImage format
-          // Note: Server-side processing now uses URLs (no base64 conversion on server)
-          // Client-side still converts to data URL for backward compatibility with downstream components
+          // URL-first approach: Store URL for display, lazy-load base64 only when needed
+          // This avoids memory overhead from eagerly converting large images to base64
           const processedImages: ProcessedImage[] = [];
           const results = jobStatus.results || [];
           
@@ -117,24 +117,15 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
               reader.readAsDataURL(originalFile);
             });
             
-            // Fetch processed image and convert to data URL for downstream compatibility
-            // This happens client-side AFTER server processing is complete (no timeout risk)
-            const processedResponse = await fetch(result.processedUrl);
-            const processedBlob = await processedResponse.blob();
-            const processedDataUrl = await new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = () => resolve(reader.result as string);
-              reader.onerror = reject;
-              reader.readAsDataURL(processedBlob);
-            });
-            
+            // URL-first: Don't eagerly convert to base64
+            // Downstream components will use getCanvasImageData() to lazy-load when needed
             processedImages.push({
               name: originalFile.name,
               originalData: originalDataUrl,
-              backgroundRemovedData: processedDataUrl, // Data URL for downstream components
-              backgroundRemovedUrl: result.processedUrl, // URL for efficient display
+              backgroundRemovedData: '', // Empty - lazy-load via getCanvasImageData() when needed
+              backgroundRemovedUrl: result.processedUrl, // URL for display and lazy loading
               processedFileId: result.processedFileId, // File ID for server-side operations
-              size: processedBlob.size,
+              size: originalFile.size, // Use original size since we're not fetching the blob
               originalSize: originalFile.size,
             });
             
@@ -274,7 +265,7 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
                         <p className="text-xs text-muted-foreground mb-1">Background Removed</p>
                         <div className="w-full h-24 rounded border bg-checkered">
                           <img
-                            src={image.backgroundRemovedUrl || image.backgroundRemovedData}
+                            src={getDisplayImageSrc(image)}
                             alt={`Processed ${image.name}`}
                             className="w-full h-full object-cover rounded"
                           />
@@ -329,7 +320,7 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
                       size="sm"
                       variant="ghost"
                       onClick={async () => {
-                        const downloadUrl = image.backgroundRemovedUrl || image.backgroundRemovedData;
+                        const downloadUrl = getDisplayImageSrc(image);
                         if (downloadUrl) {
                           const link = document.createElement('a');
                           link.href = downloadUrl;

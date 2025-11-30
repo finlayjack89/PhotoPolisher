@@ -421,8 +421,88 @@ export async function updateBatch(id: string, updates: any): Promise<any> {
 }
 
 /**
+ * Shared cache for lazy-loaded data URLs.
+ * Prevents duplicate fetch→dataURL conversions when the same image is needed multiple times.
+ * Keyed by URL or processedFileId.
+ * 
+ * Uses LRU eviction to prevent unbounded memory growth.
+ */
+const MAX_CACHE_SIZE = 50; // Maximum number of cached data URLs
+const dataUrlCache = new Map<string, string>();
+const cacheAccessOrder: string[] = []; // Track access order for LRU eviction
+
+/**
+ * LRU cache eviction: Remove oldest entries when cache exceeds max size
+ */
+function evictLRUEntries(): void {
+  while (dataUrlCache.size > MAX_CACHE_SIZE && cacheAccessOrder.length > 0) {
+    const oldestKey = cacheAccessOrder.shift();
+    if (oldestKey && dataUrlCache.has(oldestKey)) {
+      dataUrlCache.delete(oldestKey);
+      console.log(`🗑️ LRU eviction: removed ${oldestKey.substring(0, 50)}...`);
+    }
+  }
+}
+
+/**
+ * Update LRU access order when a key is accessed
+ */
+function updateAccessOrder(key: string): void {
+  const existingIndex = cacheAccessOrder.indexOf(key);
+  if (existingIndex > -1) {
+    cacheAccessOrder.splice(existingIndex, 1);
+  }
+  cacheAccessOrder.push(key);
+}
+
+/**
+ * Add entry to cache with LRU management
+ */
+function addToCache(key: string, value: string): void {
+  if (!key) return;
+  
+  updateAccessOrder(key);
+  dataUrlCache.set(key, value);
+  evictLRUEntries();
+}
+
+/**
+ * Get entry from cache and update access order
+ */
+function getFromCache(key: string): string | undefined {
+  if (!key) return undefined;
+  
+  const value = dataUrlCache.get(key);
+  if (value) {
+    updateAccessOrder(key);
+  }
+  return value;
+}
+
+/**
+ * Clear the data URL cache (useful for memory cleanup after batch processing)
+ */
+export function clearDataUrlCache(): void {
+  dataUrlCache.clear();
+  cacheAccessOrder.length = 0;
+  console.log('🧹 Data URL cache cleared');
+}
+
+/**
+ * Get cache statistics for debugging
+ */
+export function getDataUrlCacheStats(): { size: number; maxSize: number; keys: string[] } {
+  return {
+    size: dataUrlCache.size,
+    maxSize: MAX_CACHE_SIZE,
+    keys: Array.from(dataUrlCache.keys())
+  };
+}
+
+/**
  * Lazy-load a data URL from an HTTP URL
  * Used for converting server-stored images to data URLs for canvas operations
+ * Includes LRU caching to prevent duplicate fetches and bound memory usage
  * @param url The HTTP URL to fetch
  * @returns A data URL (base64-encoded image)
  */
@@ -436,19 +516,33 @@ export async function urlToDataUrl(url: string): Promise<string> {
     return url;
   }
   
+  // Check cache first (uses LRU access order update)
+  const cached = getFromCache(url);
+  if (cached) {
+    console.log(`📦 Cache hit for URL: ${url.substring(0, 50)}...`);
+    return cached;
+  }
+  
   try {
+    console.log(`🔄 Fetching image for data URL conversion: ${url.substring(0, 50)}...`);
     const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`Failed to fetch image: ${response.status}`);
     }
     
     const blob = await response.blob();
-    return new Promise<string>((resolve, reject) => {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
       reader.onerror = () => reject(new Error('Failed to convert blob to data URL'));
       reader.readAsDataURL(blob);
     });
+    
+    // Store in LRU cache (handles eviction automatically)
+    addToCache(url, dataUrl);
+    console.log(`✅ Cached data URL for: ${url.substring(0, 50)}... (cache size: ${dataUrlCache.size}/${MAX_CACHE_SIZE})`);
+    
+    return dataUrl;
   } catch (error) {
     console.error('Failed to convert URL to data URL:', error);
     throw error;
@@ -457,6 +551,7 @@ export async function urlToDataUrl(url: string): Promise<string> {
 
 /**
  * Helper to get a displayable image source - prioritizes URLs over data URLs
+ * For <img src=...> display, prefer URLs for efficiency
  * @param image Object with backgroundRemovedUrl and/or backgroundRemovedData
  * @returns The best available image source for display
  */
@@ -466,19 +561,90 @@ export function getDisplayImageSrc(image: { backgroundRemovedUrl?: string; backg
 
 /**
  * Helper to get a data URL for canvas operations, lazy-loading if necessary
- * @param image Object with backgroundRemovedUrl and/or backgroundRemovedData
+ * Uses LRU caching to prevent duplicate fetch→dataURL conversions
+ * ALWAYS stores results in cache - uses processedFileId as primary key, URL as fallback key
+ * @param image Object with backgroundRemovedUrl and/or backgroundRemovedData, and optional processedFileId for cache key
  * @returns A data URL suitable for canvas operations
  */
-export async function getCanvasImageData(image: { backgroundRemovedUrl?: string; backgroundRemovedData?: string }): Promise<string> {
-  // If we already have a data URL, use it
+export async function getCanvasImageData(image: { 
+  backgroundRemovedUrl?: string; 
+  backgroundRemovedData?: string;
+  processedFileId?: string;
+}): Promise<string> {
+  // Determine cache key: prefer processedFileId, fallback to URL
+  const cacheKey = image.processedFileId || image.backgroundRemovedUrl || '';
+  
+  // Check cache first if we have a valid key
+  if (cacheKey) {
+    const cached = getFromCache(cacheKey);
+    if (cached) {
+      console.log(`📦 Cache hit for ${image.processedFileId ? 'processedFileId' : 'URL'}: ${cacheKey.substring(0, 50)}...`);
+      return cached;
+    }
+  }
+  
+  // If we already have a data URL, cache it and return
   if (image.backgroundRemovedData && image.backgroundRemovedData.startsWith('data:')) {
+    // Always cache - use processedFileId if available, otherwise URL
+    if (cacheKey) {
+      addToCache(cacheKey, image.backgroundRemovedData);
+      console.log(`✅ Cached existing data URL by ${image.processedFileId ? 'fileId' : 'URL'}: ${cacheKey.substring(0, 50)}...`);
+    }
     return image.backgroundRemovedData;
   }
   
-  // Otherwise, lazy-load from URL
+  // Lazy-load from URL
   if (image.backgroundRemovedUrl) {
-    return urlToDataUrl(image.backgroundRemovedUrl);
+    const dataUrl = await urlToDataUrl(image.backgroundRemovedUrl);
+    
+    // ALWAYS cache result - by processedFileId AND by URL for redundant lookup paths
+    if (image.processedFileId) {
+      addToCache(image.processedFileId, dataUrl);
+    }
+    // urlToDataUrl already caches by URL, but ensure we have it
+    if (!getFromCache(image.backgroundRemovedUrl)) {
+      addToCache(image.backgroundRemovedUrl, dataUrl);
+    }
+    
+    return dataUrl;
   }
   
   throw new Error('No image data available');
+}
+
+/**
+ * Prefetch multiple images in parallel for canvas operations
+ * Useful for batch processing to load all images before starting compositing
+ * @param images Array of image objects with URL/data properties
+ * @returns Promise that resolves when all images are cached
+ */
+export async function prefetchCanvasImageData(images: Array<{ 
+  backgroundRemovedUrl?: string; 
+  backgroundRemovedData?: string;
+  processedFileId?: string;
+  name?: string;
+}>): Promise<Map<string, string>> {
+  console.log(`🔄 Prefetching ${images.length} images for canvas operations...`);
+  const startTime = Date.now();
+  
+  const results = await Promise.allSettled(
+    images.map(async (img) => {
+      const data = await getCanvasImageData(img);
+      return { key: img.processedFileId || img.backgroundRemovedUrl || img.name || '', data };
+    })
+  );
+  
+  const dataMap = new Map<string, string>();
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      dataMap.set(result.value.key, result.value.data);
+    } else {
+      console.warn(`⚠️ Failed to prefetch image ${index}:`, result.reason);
+    }
+  });
+  
+  const duration = Date.now() - startTime;
+  console.log(`✅ Prefetch complete: ${dataMap.size}/${images.length} images cached in ${duration}ms`);
+  
+  return dataMap;
 }

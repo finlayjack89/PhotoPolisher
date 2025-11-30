@@ -66,7 +66,8 @@ const WorkflowPage = () => {
         processedFileId: subject.processedFileId || '',
         processedUrl: subject.processedUrl || '',
         name: `processed-${subject.originalFileId}`,
-        backgroundRemovedData: subject.processedUrl || '',
+        backgroundRemovedUrl: subject.processedUrl || '', // URL for display (lazy-load for canvas)
+        backgroundRemovedData: '', // Empty - use getCanvasImageData() for canvas operations
         error: subject.error,
       }));
       

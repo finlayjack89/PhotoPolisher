@@ -10,7 +10,7 @@ import { SubjectPlacement } from "@/lib/canvas-utils";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
 import { useWorkflow } from "@/contexts/WorkflowContext";
-import { api } from "@/lib/api-client";
+import { api, getDisplayImageSrc } from "@/lib/api-client";
 
 interface CommercialEditingWorkflowProps {
   files: (File & { isPreCut?: boolean })[];
@@ -33,7 +33,7 @@ interface AnalysisResult {
 }
 
 interface ProcessedImages {
-  backgroundRemoved: Array<{ name: string; originalData: string; backgroundRemovedData: string; size: number; }>;
+  backgroundRemoved: Array<{ name: string; originalData: string; backgroundRemovedData: string; backgroundRemovedUrl?: string; size: number; }>;
   backdrop?: string;
   placement?: SubjectPlacement;
   masterAspectRatio?: string;
@@ -115,11 +115,15 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
     setProcessedSubjects(subjects);
     
     // Populate processedImages.backgroundRemoved for the gallery
-    // BackgroundRemovalStep returns ProcessedImage objects with originalData and backgroundRemovedData
+    // BackgroundRemovalStep returns ProcessedImage objects with:
+    // - backgroundRemovedUrl for display (URL-first approach)
+    // - backgroundRemovedData may be empty (lazy-loaded when needed for canvas ops)
+    // Use getDisplayImageSrc pattern: prioritize URL over data for efficient loading
     const backgroundRemovedImages = subjects.map((subject) => ({
       name: subject.name || 'Image',
       originalData: subject.originalData || '',
-      backgroundRemovedData: subject.backgroundRemovedData || '',
+      backgroundRemovedUrl: subject.backgroundRemovedUrl || '',
+      backgroundRemovedData: subject.backgroundRemovedData || '', // Keep original data if exists
       size: subject.size || 0
     }));
     
@@ -321,10 +325,10 @@ export const CommercialEditingWorkflow: React.FC<CommercialEditingWorkflowProps>
       finalizedData: result.compositedData
     })) || [];
     
-    // Prepare transparent images for library
+    // Prepare transparent images for library using getDisplayImageSrc helper
     const transparentImagesForLibrary = processedImages.backgroundRemoved.map(img => ({
       name: img.name,
-      data: img.backgroundRemovedData
+      data: getDisplayImageSrc(img)
     }));
     
     return (
