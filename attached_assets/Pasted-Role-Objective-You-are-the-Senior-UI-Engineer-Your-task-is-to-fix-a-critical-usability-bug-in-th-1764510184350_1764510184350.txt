@@ -1,0 +1,89 @@
+Role & Objective: You are the Senior UI Engineer. Your task is to fix a critical usability bug in the BackdropPositioning component where the subject "snaps" or jumps to the cursor position immediately upon clicking, causing massive offsets.
+
+The Diagnosis: The current implementation sets the subject's position (y) directly to the mouse coordinate on mousedown.
+
+Current Behavior: If the subject is at y=1.0 (bottom) and the user clicks the center of the image (y=0.5), the subject instantly jumps so its bottom is at 0.5.
+
+Required Behavior: When the user clicks, calculate the offset between the mouse and the subject's current position. Apply this offset during the drag to keep the subject "glued" to the cursor exactly where it was grabbed.
+
+Phase 1: Implementation (src/components/BackdropPositioning.tsx)
+Task: Refactor the drag logic to use an offset-based approach.
+
+Add State Ref: Inside the BackdropPositioning component, add a ref to store the drag offset:
+
+TypeScript
+
+const dragOffsetRef = useRef<number>(0);
+Create handleDragStart: Replace the logic that happens on mousedown with this function:
+
+TypeScript
+
+const handleDragStart = (clientY: number) => {
+  const canvas = canvasRef.current;
+  if (!canvas) return;
+
+  const rect = canvas.getBoundingClientRect();
+  // Calculate normalized mouse Y position (0 to 1)
+  const mouseY = (clientY - rect.top) / rect.height;
+
+  // CRITICAL FIX: Calculate the delta between current subject position and mouse position
+  // This "locks" the distance so the subject doesn't jump
+  dragOffsetRef.current = placement.y - mouseY;
+
+  setIsDragging(true);
+};
+Create handleDragMove: Refactor the move logic to apply the offset:
+
+TypeScript
+
+const handleDragMove = (clientY: number) => {
+  if (!isDragging) return;
+
+  const canvas = canvasRef.current;
+  if (!canvas) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const mouseY = (clientY - rect.top) / rect.height;
+
+  // Apply the offset to find the new anchor position
+  let newY = mouseY + dragOffsetRef.current;
+
+  // Clamp values to keep it reasonably on screen (optional but recommended)
+  newY = Math.max(0, Math.min(1, newY));
+
+  setPlacement(prev => ({
+    ...prev,
+    x: 0.5, // X remains locked to center
+    y: newY
+  }));
+};
+Update Canvas Events: Update the <canvas> element's event handlers to use these new functions:
+
+onMouseDown={(e) => handleDragStart(e.clientY)}
+
+onMouseMove={(e) => handleDragMove(e.clientY)}
+
+onTouchStart={(e) => handleDragStart(e.touches[0].clientY)}
+
+onTouchMove={(e) => { e.preventDefault(); handleDragMove(e.touches[0].clientY); }}
+
+Phase 2: Agentic Testing & Verification
+Do not consider the task complete until you have verified the following scenarios:
+
+The "Grab" Test:
+
+Action: Place a subject at the very bottom of the canvas (y=1.0).
+
+Action: Click the very top edge of the subject (far away from the anchor point).
+
+Expected Result: The subject must not move. It should stay exactly where it is.
+
+Failure Mode: If the subject jumps upwards so the bottom aligns with your mouse, the fix failed.
+
+The "Smooth Drag" Test:
+
+Action: Drag the subject up and down.
+
+Expected Result: The subject moves 1:1 with the mouse cursor, maintaining the exact distance from the cursor established in step 1.
+
+Execute these changes now.
