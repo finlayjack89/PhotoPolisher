@@ -19,7 +19,8 @@ Preferred communication style: Simple, everyday language.
 - **Backend**: Express.js (TypeScript) server with Vite HMR middleware, CORS, and a 50MB payload limit.
 - **Database**: PostgreSQL with Drizzle ORM for type-safe data management.
 - **Image Processing**: Client-side processing pipeline for upload, compression, HEIC to PNG conversion, AI background removal, EXIF/manual rotation, Cloudinary shadow generation, and canvas-based compositing.
-- **Asynchronous Processing**: Job queue for background removal with parallel workers and frontend polling for status updates.
+- **Asynchronous Processing**: Job queue for background removal with parallel workers and frontend polling for status updates. Uses in-memory job status cache for fast polling without database round-trips, with automatic 30-minute TTL cleanup.
+- **Resilient Polling System**: Job status polling uses exponential backoff with jitter (5 retries, 500ms-5s delays), never marks jobs as failed due to transient connection issues. Polling continues indefinitely until server confirms job completion or failure.
 - **Deployment**: Dual-mode server for production deployment on Replit Autoscale, serving pre-built static files.
 
 ### Feature Specifications
