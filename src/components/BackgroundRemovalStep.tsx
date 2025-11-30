@@ -26,6 +26,8 @@ interface ProcessedImage {
   name: string;
   originalData: string;
   backgroundRemovedData: string;
+  backgroundRemovedUrl?: string; // URL for display (avoids large data URLs in memory)
+  processedFileId?: string; // File ID for downstream operations
   size: number;
   originalSize?: number;
 }
@@ -91,6 +93,7 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
           setCurrentProcessingStep('Finalizing results...');
           
           // Step 4: Convert results to ProcessedImage format
+          // OPTIMIZATION: Use URLs directly for display, lazy-load data URLs for canvas ops
           const processedImages: ProcessedImage[] = [];
           const results = jobStatus.results || [];
           
@@ -105,7 +108,7 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
               throw new Error(result.error || 'Processing failed');
             }
             
-            // Read original file as data URL
+            // Read original file as data URL (needed for display)
             const originalDataUrl = await new Promise<string>((resolve, reject) => {
               const reader = new FileReader();
               reader.onload = () => resolve(reader.result as string);
@@ -113,7 +116,9 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
               reader.readAsDataURL(originalFile);
             });
             
-            // Fetch the processed image from the server
+            // Fetch processed image and convert to data URL for downstream canvas ops
+            // Note: We keep this for backward compatibility with AutoDeskewStep, ImageRotationStep
+            // that require data URLs for canvas operations
             const processedResponse = await fetch(result.processedUrl);
             const processedBlob = await processedResponse.blob();
             const processedDataUrl = await new Promise<string>((resolve, reject) => {
@@ -127,6 +132,8 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
               name: originalFile.name,
               originalData: originalDataUrl,
               backgroundRemovedData: processedDataUrl,
+              backgroundRemovedUrl: result.processedUrl, // URL for efficient display
+              processedFileId: result.processedFileId, // File ID for server-side operations
               size: processedBlob.size,
               originalSize: originalFile.size,
             });
@@ -267,7 +274,7 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
                         <p className="text-xs text-muted-foreground mb-1">Background Removed</p>
                         <div className="w-full h-24 rounded border bg-checkered">
                           <img
-                            src={image.backgroundRemovedData}
+                            src={image.backgroundRemovedUrl || image.backgroundRemovedData}
                             alt={`Processed ${image.name}`}
                             className="w-full h-full object-cover rounded"
                           />
