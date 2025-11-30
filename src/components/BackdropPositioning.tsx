@@ -108,6 +108,10 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   const backdropImgRef = useRef<HTMLImageElement | null>(null);
   const subjectImgRef = useRef<HTMLImageElement | null>(null);
   
+  // Drag offset ref - stores the delta between mouse position and subject position
+  // This ensures the subject doesn't "snap" to cursor on click
+  const dragOffsetRef = useRef<number>(0);
+  
   // Track what's cached in the offscreen buffer
   const cachedBackdropRef = useRef<string>('');
   const cachedBlurRef = useRef<boolean>(false);
@@ -517,54 +521,58 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     }
   }, [backdropReady, subjectReady, placement, blurBackground, masterAspectRatio, renderCanvas]);
 
-  // Canvas interaction handlers
-  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Canvas interaction handlers with offset-based drag (prevents snapping)
+  
+  /**
+   * CRITICAL FIX: Offset-based drag implementation
+   * 
+   * Problem: Previously, the subject would "snap" to the cursor position on mousedown.
+   * If the subject was at y=1.0 (bottom) and user clicked at y=0.5 (center),
+   * the subject would instantly jump so its anchor was at 0.5.
+   * 
+   * Solution: Calculate the offset between mouse position and subject position
+   * at drag start, then apply this offset during drag to keep the subject
+   * "glued" to the cursor exactly where it was grabbed.
+   */
+  
+  const handleDragStart = (clientY: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    // Calculate normalized mouse Y position (0 to 1)
+    const mouseY = (clientY - rect.top) / rect.height;
+    
+    // CRITICAL FIX: Calculate the delta between current subject position and mouse position
+    // This "locks" the distance so the subject doesn't jump
+    dragOffsetRef.current = placement.y - mouseY;
+    
     setIsDragging(true);
   };
-
-  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  
+  const handleDragMove = (clientY: number) => {
     if (!isDragging) return;
     
     const canvas = canvasRef.current;
     if (!canvas) return;
     
     const rect = canvas.getBoundingClientRect();
-    const normalizedY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    const mouseY = (clientY - rect.top) / rect.height;
+    
+    // Apply the offset to find the new anchor position
+    let newY = mouseY + dragOffsetRef.current;
+    
+    // Clamp values to keep it reasonably on screen
+    newY = Math.max(0, Math.min(1, newY));
     
     setPlacement(prev => ({
       ...prev,
-      x: 0.5,
-      y: normalizedY
+      x: 0.5, // X remains locked to center
+      y: newY
     }));
   };
-
-  const handleCanvasMouseUp = () => {
-    setIsDragging(false);
-  };
-
-  const handleCanvasTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    setIsDragging(true);
-  };
-
-  const handleCanvasTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDragging) return;
-    e.preventDefault();
-    
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const touch = e.touches[0];
-    const rect = canvas.getBoundingClientRect();
-    const normalizedY = Math.max(0, Math.min(1, (touch.clientY - rect.top) / rect.height));
-    
-    setPlacement(prev => ({
-      ...prev,
-      x: 0.5,
-      y: normalizedY
-    }));
-  };
-
-  const handleCanvasTouchEnd = () => {
+  
+  const handleDragEnd = () => {
     setIsDragging(false);
   };
   
@@ -826,14 +834,14 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
                         "rounded-lg border-2 border-primary/50 touch-none max-w-full",
                         isDragging ? "cursor-grabbing" : "cursor-grab"
                       )}
-                      onMouseDown={handleCanvasMouseDown}
-                      onMouseMove={handleCanvasMouseMove}
-                      onMouseUp={handleCanvasMouseUp}
-                      onMouseLeave={handleCanvasMouseUp}
-                      onTouchStart={handleCanvasTouchStart}
-                      onTouchMove={handleCanvasTouchMove}
-                      onTouchEnd={handleCanvasTouchEnd}
-                      onTouchCancel={handleCanvasTouchEnd}
+                      onMouseDown={(e) => handleDragStart(e.clientY)}
+                      onMouseMove={(e) => handleDragMove(e.clientY)}
+                      onMouseUp={handleDragEnd}
+                      onMouseLeave={handleDragEnd}
+                      onTouchStart={(e) => handleDragStart(e.touches[0].clientY)}
+                      onTouchMove={(e) => { e.preventDefault(); handleDragMove(e.touches[0].clientY); }}
+                      onTouchEnd={handleDragEnd}
+                      onTouchCancel={handleDragEnd}
                       data-testid="preview-canvas"
                       style={{ maxWidth: '100%', height: 'auto' }}
                     />
