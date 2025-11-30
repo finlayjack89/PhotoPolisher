@@ -3,6 +3,7 @@ import { backgroundJobs } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import { removeBackgrounds } from '../image-processing/remove-backgrounds';
 import type { IStorage } from '../storage';
+import { getPublicFileUrl } from '../utils/url-utils';
 
 type AppDatabase = typeof DrizzleDb;
 
@@ -31,6 +32,7 @@ export async function processBackgroundRemoval(
       try {
         console.log(`[Background Job ${jobId}] Processing ${index + 1}/${fileIds.length}`);
 
+        // Get file metadata for size info
         const fileData = await storage.getFile(fileId);
         
         if (!fileData) {
@@ -40,16 +42,20 @@ export async function processBackgroundRemoval(
           };
         }
 
-        const { file, buffer } = fileData;
-
-        const base64Data = `data:${file.mimeType};base64,${buffer.toString('base64')}`;
+        const { file } = fileData;
+        
+        // Use URL-based approach - Replicate will fetch the image directly
+        const publicUrl = getPublicFileUrl(fileId);
+        console.log(`[Background Job ${jobId}] Using public URL: ${publicUrl}`);
 
         const result = await removeBackgrounds({
-          images: [{
-            data: base64Data,
+          urls: [{
+            url: publicUrl,
             name: file.originalFilename || fileId,
+            fileId: fileId,
+            sizeBytes: file.bytes,
           }],
-        });
+        }, storage);
 
         if (!result.success || !result.images || result.images.length === 0) {
           return {
@@ -67,32 +73,52 @@ export async function processBackgroundRemoval(
           };
         }
 
-        const base64Match = processedImage.transparentData.match(/^data:([^;]+);base64,(.+)$/);
-        if (!base64Match) {
+        // The removeBackgrounds function with storage now stores the result
+        // and returns a resultUrl (local file path)
+        if (processedImage.resultUrl) {
+          // Extract file ID from URL if it's a local path
+          const processedFileId = processedImage.resultUrl.replace('/api/files/', '');
           return {
             originalFileId: fileId,
-            error: 'Invalid processed image format',
+            processedFileId: processedFileId,
+            processedUrl: processedImage.resultUrl,
           };
         }
 
-        const processedMimeType = base64Match[1];
-        const processedBase64 = base64Match[2];
-        const processedBuffer = Buffer.from(processedBase64, 'base64');
+        // Legacy: handle transparentData response
+        if (processedImage.transparentData) {
+          const base64Match = processedImage.transparentData.match(/^data:([^;]+);base64,(.+)$/);
+          if (!base64Match) {
+            return {
+              originalFileId: fileId,
+              error: 'Invalid processed image format',
+            };
+          }
 
-        const processedFile = await storage.createFile(
-          {
-            storageKey: `processed/background-removed/${Date.now()}-${fileId}`,
-            mimeType: processedMimeType,
-            bytes: processedBuffer.length,
-            originalFilename: `bg-removed-${file.originalFilename || fileId}`,
-          },
-          processedBuffer
-        );
+          const processedMimeType = base64Match[1];
+          const processedBase64 = base64Match[2];
+          const processedBuffer = Buffer.from(processedBase64, 'base64');
+
+          const processedFile = await storage.createFile(
+            {
+              storageKey: `processed/background-removed/${Date.now()}-${fileId}`,
+              mimeType: processedMimeType,
+              bytes: processedBuffer.length,
+              originalFilename: `bg-removed-${file.originalFilename || fileId}`,
+            },
+            processedBuffer
+          );
+
+          return {
+            originalFileId: fileId,
+            processedFileId: processedFile.id,
+            processedUrl: `/api/files/${processedFile.id}`,
+          };
+        }
 
         return {
           originalFileId: fileId,
-          processedFileId: processedFile.id,
-          processedUrl: `/api/files/${processedFile.id}`,
+          error: 'No processed image data returned',
         };
       } catch (error) {
         console.error(`[Background Job ${jobId}] Error processing file ${fileId}:`, error);
@@ -103,6 +129,7 @@ export async function processBackgroundRemoval(
       }
     };
 
+    // Process in parallel batches of 3
     for (let i = 0; i < fileIds.length; i += 3) {
       const batch = fileIds.slice(i, i + 3);
       const batchResults = await Promise.all(
