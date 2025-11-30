@@ -28,6 +28,7 @@ Preferred communication style: Simple, everyday language.
 - **Multi-Step Workflow**: Guides users through complex editing processes with clear feedback.
 - **Type Safety**: Achieved through TypeScript, Zod, and Drizzle for robust development.
 - **Opaque File IDs**: UUIDs are used to abstract file storage details, enabling flexible future cloud migration.
+- **URL-Based File Handling**: Files are passed between client and server using URLs instead of base64 data. External APIs (Replicate, Cloudinary) receive public URLs directly via `getPublicFileUrl()` utility. Prevents server timeouts from base64 conversion overhead. Frontend uses `backgroundRemovedUrl` for efficient display, lazy-loading data URLs only when needed for canvas operations via `getCanvasImageData()`.
 - **API Hardening**: Includes timeout controls, exponential backoff, and defensive parsing for external API calls.
 - **Auto-Deskew System**: Automatically straightens tilted product images using advanced image processing techniques.
 - **Auto-Scale System**: Subjects auto-scale to exactly 80% of backdrop width when loaded (no scale limits). Dimension-tracked reset recalculates when backdrop or subject changes. User manual adjustments preserved until new backdrop/subject loaded.

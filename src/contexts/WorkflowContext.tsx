@@ -28,6 +28,7 @@ interface WorkflowState {
     originalFileId: string;
     processedFileId: string;
     processedUrl?: string;
+    backgroundRemovedUrl?: string; // URL for efficient display (lazy-load for canvas)
     name?: string;
     backgroundRemovedData?: string;
     originalData?: string;
@@ -39,6 +40,8 @@ interface WorkflowState {
     rotationConfidence?: number;
     shadowedData?: string;
     shadowedFileId?: string;
+    size?: number;
+    originalSize?: number;
   }>;
   autoDeskewEnabled: boolean;
   selectedBackdropId: string | null;

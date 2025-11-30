@@ -419,3 +419,66 @@ export async function updateBatch(id: string, updates: any): Promise<any> {
     body: JSON.stringify(updates),
   });
 }
+
+/**
+ * Lazy-load a data URL from an HTTP URL
+ * Used for converting server-stored images to data URLs for canvas operations
+ * @param url The HTTP URL to fetch
+ * @returns A data URL (base64-encoded image)
+ */
+export async function urlToDataUrl(url: string): Promise<string> {
+  if (!url) {
+    throw new Error('No URL provided');
+  }
+  
+  // If it's already a data URL, return as-is
+  if (url.startsWith('data:')) {
+    return url;
+  }
+  
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: ${response.status}`);
+    }
+    
+    const blob = await response.blob();
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Failed to convert blob to data URL'));
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    console.error('Failed to convert URL to data URL:', error);
+    throw error;
+  }
+}
+
+/**
+ * Helper to get a displayable image source - prioritizes URLs over data URLs
+ * @param image Object with backgroundRemovedUrl and/or backgroundRemovedData
+ * @returns The best available image source for display
+ */
+export function getDisplayImageSrc(image: { backgroundRemovedUrl?: string; backgroundRemovedData?: string }): string {
+  return image.backgroundRemovedUrl || image.backgroundRemovedData || '';
+}
+
+/**
+ * Helper to get a data URL for canvas operations, lazy-loading if necessary
+ * @param image Object with backgroundRemovedUrl and/or backgroundRemovedData
+ * @returns A data URL suitable for canvas operations
+ */
+export async function getCanvasImageData(image: { backgroundRemovedUrl?: string; backgroundRemovedData?: string }): Promise<string> {
+  // If we already have a data URL, use it
+  if (image.backgroundRemovedData && image.backgroundRemovedData.startsWith('data:')) {
+    return image.backgroundRemovedData;
+  }
+  
+  // Otherwise, lazy-load from URL
+  if (image.backgroundRemovedUrl) {
+    return urlToDataUrl(image.backgroundRemovedUrl);
+  }
+  
+  throw new Error('No image data available');
+}

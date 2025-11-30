@@ -40,6 +40,7 @@ interface ProcessedSubject {
   name: string;
   originalData: string;
   backgroundRemovedData: string;
+  backgroundRemovedUrl?: string; // URL for efficient display (lazy-load for canvas)
   deskewedData?: string;
   cleanDeskewedData?: string;
   size: number;
@@ -143,17 +144,20 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         } else {
           const subject = firstSubject as ProcessedSubject;
           const wasRotated = subject.rotationConfidence && subject.rotationConfidence >= 75;
-          cutoutData = wasRotated && subject.deskewedData 
-            ? subject.deskewedData 
-            : subject.backgroundRemovedData;
           
+          // Try URL first for efficiency, fallback to data URL
           if (wasRotated && subject.deskewedData) {
+            cutoutData = subject.deskewedData;
             console.log(`✅ Preview using rotated image for ${subject.name} (confidence: ${subject.rotationConfidence}%)`);
+          } else if (subject.backgroundRemovedUrl) {
+            cutoutData = subject.backgroundRemovedUrl;
+            console.log(`📐 Preview using URL for ${subject.name}`);
           } else {
+            cutoutData = subject.backgroundRemovedData;
             const reason = subject.rotationConfidence !== undefined && subject.rotationConfidence < 75 
               ? `low confidence (${subject.rotationConfidence}%)` 
               : 'no rotation available';
-            console.log(`📐 Preview using original image for ${subject.name} (${reason})`);
+            console.log(`📐 Preview using data URL for ${subject.name} (${reason})`);
           }
         }
 

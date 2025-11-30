@@ -5,18 +5,21 @@ import { Badge } from "@/components/ui/badge";
 import { RotateCw, RotateCcw, ArrowLeft, ArrowRight } from "lucide-react";
 import { rotateImageClockwise, rotateImageCounterClockwise } from "@/lib/image-rotation-utils";
 import { useToast } from "@/hooks/use-toast";
+import { getCanvasImageData } from "@/lib/api-client";
 
 interface ImageRotationStepProps {
   images: Array<{
     name: string;
     originalData?: string;
     backgroundRemovedData?: string;
+    backgroundRemovedUrl?: string;
     size: number;
   }>;
   onContinue: (rotatedImages: Array<{
     name: string;
     originalData?: string;
     backgroundRemovedData?: string;
+    backgroundRemovedUrl?: string;
     size: number;
   }>) => void;
   onBack: () => void;
@@ -46,7 +49,30 @@ export const ImageRotationStep: React.FC<ImageRotationStepProps> = ({
     
     try {
       const image = currentImages[index];
-      const targetData = isPreCut ? image.originalData || image.backgroundRemovedData : image.backgroundRemovedData;
+      
+      // Lazy-load the image data for canvas operations
+      let targetData: string;
+      try {
+        if (isPreCut) {
+          targetData = image.originalData || await getCanvasImageData({
+            backgroundRemovedUrl: image.backgroundRemovedUrl,
+            backgroundRemovedData: image.backgroundRemovedData,
+          });
+        } else {
+          targetData = await getCanvasImageData({
+            backgroundRemovedUrl: image.backgroundRemovedUrl,
+            backgroundRemovedData: image.backgroundRemovedData,
+          });
+        }
+      } catch (loadError) {
+        toast({
+          title: "Error",
+          description: "Failed to load image data for rotation",
+          variant: "destructive"
+        });
+        setIsRotating(null);
+        return;
+      }
       
       if (!targetData) {
         toast({
@@ -94,7 +120,12 @@ export const ImageRotationStep: React.FC<ImageRotationStepProps> = ({
   };
 
   const getImageDataToDisplay = (image: typeof currentImages[0]) => {
-    // Use background removed data if available, otherwise use original data
+    // Prefer URL for display (more efficient than data URLs)
+    if (image.backgroundRemovedUrl) {
+      return image.backgroundRemovedUrl;
+    }
+    
+    // Use background removed data if available
     if (image.backgroundRemovedData && image.backgroundRemovedData.startsWith('data:image/')) {
       return image.backgroundRemovedData;
     }

@@ -93,7 +93,8 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
           setCurrentProcessingStep('Finalizing results...');
           
           // Step 4: Convert results to ProcessedImage format
-          // OPTIMIZATION: Use URLs directly for display, lazy-load data URLs for canvas ops
+          // Note: Server-side processing now uses URLs (no base64 conversion on server)
+          // Client-side still converts to data URL for backward compatibility with downstream components
           const processedImages: ProcessedImage[] = [];
           const results = jobStatus.results || [];
           
@@ -116,9 +117,8 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
               reader.readAsDataURL(originalFile);
             });
             
-            // Fetch processed image and convert to data URL for downstream canvas ops
-            // Note: We keep this for backward compatibility with AutoDeskewStep, ImageRotationStep
-            // that require data URLs for canvas operations
+            // Fetch processed image and convert to data URL for downstream compatibility
+            // This happens client-side AFTER server processing is complete (no timeout risk)
             const processedResponse = await fetch(result.processedUrl);
             const processedBlob = await processedResponse.blob();
             const processedDataUrl = await new Promise<string>((resolve, reject) => {
@@ -131,7 +131,7 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
             processedImages.push({
               name: originalFile.name,
               originalData: originalDataUrl,
-              backgroundRemovedData: processedDataUrl,
+              backgroundRemovedData: processedDataUrl, // Data URL for downstream components
               backgroundRemovedUrl: result.processedUrl, // URL for efficient display
               processedFileId: result.processedFileId, // File ID for server-side operations
               size: processedBlob.size,
@@ -328,13 +328,16 @@ export const BackgroundRemovalStep: React.FC<BackgroundRemovalStepProps> = ({
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => {
-                        const link = document.createElement('a');
-                        link.href = image.backgroundRemovedData;
-                        link.download = `background_removed_${image.name}`;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
+                      onClick={async () => {
+                        const downloadUrl = image.backgroundRemovedUrl || image.backgroundRemovedData;
+                        if (downloadUrl) {
+                          const link = document.createElement('a');
+                          link.href = downloadUrl;
+                          link.download = `background_removed_${image.name}`;
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                        }
                       }}
                       className="w-full mt-2"
                     >

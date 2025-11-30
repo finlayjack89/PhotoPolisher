@@ -5,7 +5,7 @@ import { Progress } from "@/components/ui/progress";
 import { ArrowLeft, ArrowRight, Loader2, RotateCw } from "lucide-react";
 import { autoDeskewSubject } from "@/lib/image-orientation-utils";
 import { useToast } from "@/hooks/use-toast";
-import { uploadFile } from "@/lib/api-client";
+import { uploadFile, getCanvasImageData } from "@/lib/api-client";
 
 // Helper function to convert data URL to File object
 const dataURLToFile = (dataUrl: string, filename: string): File => {
@@ -61,16 +61,22 @@ export const AutoDeskewStep: React.FC<AutoDeskewStepProps> = ({
               const i = startIdx + batchOffset;
               setCurrentIndex(i);
               
-              // Skip if subject doesn't have required data
-              if (!subject.backgroundRemovedData) {
-                console.warn(`Subject ${i} missing backgroundRemovedData, skipping auto-deskew`);
+              // Get background removed data - lazy-load from URL if needed
+              let bgRemovedData: string;
+              try {
+                bgRemovedData = await getCanvasImageData({
+                  backgroundRemovedUrl: subject.backgroundRemovedUrl,
+                  backgroundRemovedData: subject.backgroundRemovedData,
+                });
+              } catch (loadError) {
+                console.warn(`Subject ${i} failed to load backgroundRemovedData, skipping auto-deskew:`, loadError);
                 return;
               }
 
               try {
                 // Call autoDeskewSubject with background removed data and original data
                 const result = await autoDeskewSubject(
-                  subject.backgroundRemovedData,
+                  bgRemovedData,
                   subject.originalData
                 );
 

@@ -29,6 +29,7 @@ interface Subject {
   originalData?: string;
   originalFileId?: string;
   backgroundRemovedData?: string;
+  backgroundRemovedUrl?: string; // URL for efficient display (lazy-load for canvas)
   processedFileId?: string;
   deskewedData?: string; // Rotated version with background removed
   deskewedFileId?: string; // File ID for deskewed version
@@ -242,6 +243,10 @@ export const BatchProcessingStep: React.FC<BatchProcessingStepProps> = ({
           } else if (subject.processedFileId) {
             fileId = subject.processedFileId;
             source = 'processedFileId';
+          } else if (subject.backgroundRemovedUrl) {
+            // Use URL directly - will be converted to fileId by the API if needed
+            fallbackData = subject.backgroundRemovedUrl;
+            source = 'backgroundRemovedUrl (no fileId)';
           } else {
             fallbackData = subject.backgroundRemovedData || '';
             source = 'backgroundRemovedData (no fileId)';
