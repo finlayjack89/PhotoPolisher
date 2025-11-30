@@ -40,7 +40,10 @@ Preferred communication style: Simple, everyday language.
 - **Smart Reflection Generator**: Creates photorealistic product reflections with performance-optimized blur, Fresnel falloff, and subtle opacity.
 - **Contact Shadow System**: Adds realistic grounding effects with downscaled, blurred black silhouettes.
 - **Simplified Positioning**: User-controlled product positioning without automatic padding manipulation.
-- **Reference Width Strategy for Preview-Export Parity**: Compositing engine uses `REFERENCE_WIDTH = 3000` constant with `getScaledValue(baseValue, currentWidth)` helper for proportional blur scaling. All spatial effects (depth-of-field, reflections, contact shadows) scale proportionally to canvas width without caps. Preview uses display-space projection (`displayScale = canvasWidth / backdropWidth`) and separates shadow vs clean dimensions for accurate layout calculation. When Cloudinary shadow is ready, exact dimensions are used; otherwise, estimated padding (1.4x ratio) maintains approximate positioning until shadow loads.
+- **Reference Width Strategy for Preview-Export Parity**: Compositing engine uses `REFERENCE_WIDTH = 3000` constant with `getScaledValue(baseValue, currentWidth, minValue=0.5)` helper for proportional blur scaling. All spatial effects (depth-of-field, reflections, contact shadows) scale proportionally to canvas width without caps. Preview uses display-space projection (`displayScale = canvasWidth / backdropWidth`) and separates shadow vs clean dimensions for accurate layout calculation.
+- **Shadow Dimension Storing**: WorkflowContext stores actual shadow dimensions via `storeSubjectDimensions` when Cloudinary image loads. `getStoredSubjectDimensions` retrieves these for layout calculation. Fallback uses `SHADOW_PADDING_RATIO = 1.4` estimate before shadow is ready.
+- **Floor-Based Y Positioning**: Product positioning uses `subjectY = canvasH * placement.y - drawHeight` where y=1 means product sits at canvas bottom, y=0.5 at center. Continuous 0-1 range with no snapping.
+- **Test Suite**: Comprehensive unit tests in `canvas-utils.test.ts` with 23 tests covering Y-axis positioning, preview-export parity, blur scaling, layout calculations, and edge cases.
 
 ## External Dependencies
 
