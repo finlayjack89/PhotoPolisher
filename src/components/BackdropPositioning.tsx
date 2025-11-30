@@ -25,7 +25,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import { SubjectPlacement, getImageDimensions, computeCompositeLayout, applyDepthOfField } from "@/lib/canvas-utils";
+import { SubjectPlacement, getImageDimensions, computeCompositeLayout, applyDepthOfField, REFERENCE_WIDTH } from "@/lib/canvas-utils";
 import { fileToDataUrl } from "@/lib/file-utils";
 import { useToast } from "@/hooks/use-toast";
 import { BackdropLibrary } from "@/components/BackdropLibrary";
@@ -179,6 +179,20 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   const prevBackdropWidthRef = useRef<number>(0);
   const prevSubjectWidthRef = useRef<number>(0);
 
+  /**
+   * Auto-Scale Effect: Calculates optimal subject scale for 80% backdrop coverage.
+   * 
+   * DIMENSION SPACE INVARIANCE:
+   * The scale is calculated as a dimensionless ratio (sourceSpace/sourceSpace),
+   * which applies correctly to both:
+   * - Preview: displaySubject * scale → correct proportion on displayCanvas
+   * - Export: naturalSubject * scale → correct proportion on naturalCanvas
+   * 
+   * Example with 3000px backdrop, 1500px subject:
+   * - optimalScale = (3000 * 0.8) / 1500 = 1.6
+   * - Preview (600px): 300px subject * 1.6 = 480px (80% of 600px) ✓
+   * - Export (3000px): 1500px subject * 1.6 = 2400px (80% of 3000px) ✓
+   */
   useEffect(() => {
     if (backdropDimensions.w <= 1 || subjectDimensions.w <= 1) return;
     
@@ -187,6 +201,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     
     if (!backdropChanged && !subjectChanged && hasAutoScaled) return;
     
+    // Calculate scale ratio in source-space (dimensionless, applies to any resolution)
     const targetWidth = backdropDimensions.w * 0.8;
     const optimalScale = targetWidth / subjectDimensions.w;
     const clampedScale = optimalScale;
@@ -369,29 +384,98 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
     }
     
     // Draw subject using computeCompositeLayout for positioning
-    if (subjectImgRef.current && subjectDimensions.w > 1) {
-      // For preview, we use the canvas dimensions and the subject's natural dimensions
-      // The placement.scale is already calculated to make subject 80% of backdrop width
+    if (subjectImgRef.current && subjectDimensions.w > 1 && backdropDimensions.w > 1) {
+      /**
+       * CRITICAL: Scene-to-Display Projection for Pixel-for-Pixel Parity
+       * 
+       * The displayScale factor projects the subject from "source space" (3000px backdrop)
+       * into "display space" (600px preview canvas). Without this, the layout engine
+       * would calculate positions for a 3000px canvas but draw on a 600px canvas,
+       * causing the subject to render enormously large (out of bounds).
+       * 
+       * Formula: displayScale = previewWidth / sourceBackdropWidth
+       * Example: 600 / 3000 = 0.2
+       * 
+       * DIMENSION PARITY STRATEGY:
+       * - When Cloudinary shadow is ready (livePreviewUrl set), use actual padded dimensions
+       * - When using clean cutout (fallback), estimate shadow padding for positioning consistency
+       * - This ensures offsetX/Y calculations match batch export even during loading
+       * 
+       * SHADOW PADDING ESTIMATION:
+       * Cloudinary shadow transformations typically add ~20% padding (c_lpad with shadow).
+       * We use this estimate when shadow isn't ready to maintain position parity.
+       */
+      const displayScale = width / backdropDimensions.w;
+      
+      // Check if we have the actual Cloudinary shadow image loaded
+      const hasShadowImage = livePreviewUrl && 
+        subjectImgRef.current.src.includes('cloudinary') &&
+        subjectImgRef.current.naturalWidth > 0;
+      
+      let displayShadowW: number;
+      let displayShadowH: number;
+      
+      if (hasShadowImage) {
+        // Use actual shadow dimensions from Cloudinary (includes padding)
+        displayShadowW = subjectImgRef.current.naturalWidth * displayScale;
+        displayShadowH = subjectImgRef.current.naturalHeight * displayScale;
+      } else {
+        // Estimate shadow dimensions using expected padding ratio
+        // Cloudinary c_lpad shadow typically adds ~20% padding on each side
+        const SHADOW_PADDING_RATIO = 1.4; // 40% total increase (20% each side)
+        displayShadowW = subjectDimensions.w * displayScale * SHADOW_PADDING_RATIO;
+        displayShadowH = subjectDimensions.h * displayScale * SHADOW_PADDING_RATIO;
+        console.log('⚠️ [Preview] Using estimated shadow padding (Cloudinary not ready)');
+      }
+      
+      // Clean subject dimensions (from stored dimensions - original cutout without shadow)
+      const displayCleanW = subjectDimensions.w * displayScale;
+      const displayCleanH = subjectDimensions.h * displayScale;
+      
+      console.log('📐 [Preview] Scene-to-Display Projection:', {
+        displayScale: displayScale.toFixed(4),
+        backdropWidth: backdropDimensions.w,
+        canvasWidth: width,
+        hasShadowImage,
+        shadowDims: { w: displayShadowW.toFixed(2), h: displayShadowH.toFixed(2) },
+        cleanDims: { w: displayCleanW.toFixed(2), h: displayCleanH.toFixed(2) },
+        paddingRatio: (displayShadowW / displayCleanW).toFixed(3)
+      });
+      
+      // Pass both shadow and clean dimensions for parity with batch export
+      // This ensures offsetX/offsetY are calculated correctly for product positioning
       const layout = computeCompositeLayout(
         width,
         height,
-        subjectImgRef.current.naturalWidth,  // Shadow subject (same as clean for preview)
-        subjectImgRef.current.naturalHeight,
-        subjectImgRef.current.naturalWidth,  // Clean subject
-        subjectImgRef.current.naturalHeight,
+        displayShadowW,  // Shadow subject (actual or estimated padding)
+        displayShadowH,
+        displayCleanW,   // Clean subject (original cutout dimensions)
+        displayCleanH,
         placement
       );
       
       // Draw subject at calculated position
-      ctx.drawImage(
-        subjectImgRef.current,
-        layout.productRect.x,
-        layout.productRect.y,
-        layout.productRect.width,
-        layout.productRect.height
-      );
+      // Use shadowedSubjectRect when we have shadow image, productRect otherwise
+      if (hasShadowImage) {
+        ctx.drawImage(
+          subjectImgRef.current,
+          layout.shadowedSubjectRect.x,
+          layout.shadowedSubjectRect.y,
+          layout.shadowedSubjectRect.width,
+          layout.shadowedSubjectRect.height
+        );
+      } else {
+        // For clean cutout, draw at productRect (centered within virtual shadow padding)
+        ctx.drawImage(
+          subjectImgRef.current,
+          layout.productRect.x,
+          layout.productRect.y,
+          layout.productRect.width,
+          layout.productRect.height
+        );
+      }
     }
-  }, [getCanvasDimensions, renderBackdropBuffer, placement, subjectDimensions]);
+  }, [getCanvasDimensions, renderBackdropBuffer, placement, subjectDimensions, backdropDimensions, livePreviewUrl]);
 
   // Re-render canvas when dependencies change (including image ready states)
   useEffect(() => {

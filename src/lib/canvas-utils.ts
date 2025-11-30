@@ -3,8 +3,46 @@ import { loadImage } from './file-utils';
 import { generateSmartReflection } from './reflection-utils';
 
 /**
+ * Reference Width for Scaling Strategy
+ * All spatial effects (blurs, offsets, shadows) are calculated dynamically
+ * based on this reference standard, ensuring preview and export match pixel-for-pixel.
+ * 
+ * Formula: ScaledValue = BaseValue × (CurrentCanvasWidth / REFERENCE_WIDTH)
+ */
+export const REFERENCE_WIDTH = 3000;
+
+/**
+ * Calculates a scaled value based on the current canvas width.
+ * Ensures effects look consistent across different resolutions.
+ * 
+ * The scaling ensures PIXEL-FOR-PIXEL PARITY between preview and export:
+ * - Preview at 600px with 1.8px blur → scaled up 5x = 9px blur
+ * - Export at 3000px with 9px blur → identical when viewed at same physical size
+ * - Export at 6000px with 18px blur → downscaled to 3000px = 9px blur equivalent
+ * 
+ * IMPORTANT: No maximum cap is applied because:
+ * 1. Proportional scaling is required for true pixel-for-pixel parity
+ * 2. 18px blur on 6000px canvas = 9px blur on 3000px canvas visually
+ * 3. Capping would break parity for exports larger than REFERENCE_WIDTH
+ * 
+ * Only minimum clamping is applied to prevent blur from becoming invisible.
+ * 
+ * @param baseValue - The base value calibrated for REFERENCE_WIDTH (3000px)
+ * @param currentWidth - The actual canvas width being rendered
+ * @param minValue - Optional minimum value to prevent artifacts (default: 0.5)
+ * @returns Scaled value appropriate for the current canvas size
+ */
+export function getScaledValue(baseValue: number, currentWidth: number, minValue: number = 0.5): number {
+  const scaledValue = baseValue * (currentWidth / REFERENCE_WIDTH);
+  // Only clamp minimum to prevent invisible effects on small canvases
+  // No maximum cap - proportional scaling is required for pixel-for-pixel parity
+  return Math.max(minValue, scaledValue);
+}
+
+/**
  * Applies a realistic f/2.8 depth of field effect with a gradual floor ramp.
- * Configured for "75% intensity" (9px) and "starts lower" logic (0.9 stop).
+ * Configured for "75% intensity" (9px at 3000px) and "starts lower" logic (0.9 stop).
+ * Uses dynamic scaling to ensure preview matches export.
  * Exported for use in Live Canvas Preview to ensure WYSIWYG accuracy.
  */
 export function applyDepthOfField(
@@ -20,8 +58,11 @@ export function applyDepthOfField(
   
   if (!blurCtx) return;
 
-  // 1. Reduced Blur Radius (75% strength)
-  blurCtx.filter = 'blur(9px)'; 
+  // Dynamic blur scaling: 9px base at 3000px reference
+  const scaledBlur = getScaledValue(9, width);
+  console.log(`📷 [DoF] Blur scaling: ${scaledBlur.toFixed(2)}px (base: 9px, width: ${width}px)`);
+  
+  blurCtx.filter = `blur(${scaledBlur}px)`; 
   blurCtx.drawImage(image, 0, 0, width, height);
   blurCtx.filter = 'none';
 
@@ -258,28 +299,35 @@ export async function getImageDimensions(
 /**
  * Draws a reflection of the clean subject image onto the main canvas.
  * Uses the new studio-grade reflection with proper overlap to eliminate gaps.
+ * Blur is dynamically scaled based on canvas width for consistent appearance.
  * 
  * @param ctx - Main canvas context to draw the reflection onto
  * @param cleanSubjectImg - The clean subject image (HTMLImageElement)
  * @param reflectionRect - Where to draw the reflection (x, y, width, height)
  * @param reflectionOptions - Opacity and falloff parameters
+ * @param canvasWidth - Canvas width for dynamic blur scaling
  */
 async function drawReflection(
   ctx: CanvasRenderingContext2D,
   cleanSubjectImg: HTMLImageElement,
   reflectionRect: LayoutRect,
-  reflectionOptions: ReflectionOptions
+  reflectionOptions: ReflectionOptions,
+  canvasWidth: number
 ): Promise<void> {
   const { x, y, width, height } = reflectionRect;
   const { opacity } = reflectionOptions;
 
+  // Dynamic blur scaling: 4px base at 3000px reference
+  const scaledBlur = getScaledValue(4, canvasWidth);
+  console.log(`🪞 [Reflection] Blur scaling: ${scaledBlur.toFixed(2)}px (base: 4px, canvasWidth: ${canvasWidth}px)`);
+
   try {
-    // Generate studio-grade reflection with blur and gradient
+    // Generate studio-grade reflection with dynamically scaled blur
     const reflectionCanvas = await generateSmartReflection(
       cleanSubjectImg,
       width,
       height,
-      4,  // blur: 4px for surface diffusion
+      scaledBlur,  // Dynamic blur based on canvas width
       opacity // Master opacity baked into the reflection texture
     );
 
@@ -435,7 +483,8 @@ export async function compositeLayersV2(
         height: reflectionHeight
       };
       
-      await drawReflection(ctx, cleanSubjectImg, adjustedReflectionRect, reflectionOptions);
+      // Pass canvasWidth for dynamic blur scaling
+      await drawReflection(ctx, cleanSubjectImg, adjustedReflectionRect, reflectionOptions, layout.canvasWidth);
     }
 
     // --- NEW FEATURE: CONTACT SHADOW (Safe Mode) ---
@@ -454,8 +503,11 @@ export async function compositeLayersV2(
           const shadowY = productY + layout.productRect.height - (shadowH * 0.6);
           const shadowX = layout.productRect.x;
 
-          // Style: Soft blur + 40% opacity
-          ctx.filter = 'blur(8px)'; 
+          // Dynamic contact shadow blur scaling: 8px base at 3000px reference
+          const scaledShadowBlur = getScaledValue(8, layout.canvasWidth);
+          console.log(`🌑 [Contact Shadow] Blur scaling: ${scaledShadowBlur.toFixed(2)}px (base: 8px, canvasWidth: ${layout.canvasWidth}px)`);
+          
+          ctx.filter = `blur(${scaledShadowBlur}px)`; 
           ctx.globalAlpha = 0.4;    
           
           ctx.drawImage(footprint, shadowX, shadowY, shadowW, shadowH);
