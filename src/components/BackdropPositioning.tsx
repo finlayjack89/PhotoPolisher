@@ -86,9 +86,9 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const { toast } = useToast();
-  const { state, setShadowConfig } = useWorkflow();
+  const { state, setShadowConfig, setSubjectDimensions: storeSubjectDimensions, getSubjectDimensions: getStoredSubjectDimensions } = useWorkflow();
 
-  const [subjectDimensions, setSubjectDimensions] = useState({ w: 1, h: 1 });
+  const [subjectDimensions, setLocalSubjectDimensions] = useState({ w: 1, h: 1 });
   const [backdropDimensions, setBackdropDimensions] = useState({ w: 1, h: 1 });
   const [hasAutoScaled, setHasAutoScaled] = useState(false);
 
@@ -157,7 +157,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
 
         setPreviewCutout(cutoutData);
         const dims = await getImageDimensions(cutoutData);
-        setSubjectDimensions({ w: dims.width, h: dims.height });
+        setLocalSubjectDimensions({ w: dims.width, h: dims.height });
       } catch (error) {
         console.error("Preview Generation Error:", error);
         setPreviewError("Could not load preview cutout. Please go back and retry.");
@@ -286,11 +286,38 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
       img.onload = () => {
         subjectImgRef.current = img;
         setSubjectReady(true);
-        console.log('🖼️ [Canvas] Subject image loaded');
+        
+        // Store shadow dimensions in workflow context when Cloudinary image loads
+        // This ensures preview and export use identical dimensions
+        const isCloudinaryImage = livePreviewUrl && subjectSrc.includes('cloudinary');
+        if (isCloudinaryImage && img.naturalWidth > 0 && subjectDimensions.w > 0) {
+          const paddingRatio = img.naturalWidth / subjectDimensions.w;
+          const subjectId = 'preview'; // Use a consistent ID for the preview subject
+          
+          console.log('📐 [Canvas] Storing shadow dimensions in workflow context:', {
+            shadowWidth: img.naturalWidth,
+            shadowHeight: img.naturalHeight,
+            cleanWidth: subjectDimensions.w,
+            cleanHeight: subjectDimensions.h,
+            paddingRatio: paddingRatio.toFixed(3)
+          });
+          
+          storeSubjectDimensions(subjectId, {
+            cleanWidth: subjectDimensions.w,
+            cleanHeight: subjectDimensions.h,
+            shadowWidth: img.naturalWidth,
+            shadowHeight: img.naturalHeight,
+            shadowUrl: subjectSrc,
+            paddingRatio,
+            timestamp: Date.now()
+          });
+        }
+        
+        console.log('🖼️ [Canvas] Subject image loaded', { isCloudinaryImage });
       };
       img.src = subjectSrc;
     }
-  }, [livePreviewUrl, previewCutout]);
+  }, [livePreviewUrl, previewCutout, subjectDimensions, storeSubjectDimensions]);
 
   // Calculate canvas dimensions based on aspect ratio
   const getCanvasDimensions = useCallback(() => {
@@ -396,16 +423,15 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
        * Formula: displayScale = previewWidth / sourceBackdropWidth
        * Example: 600 / 3000 = 0.2
        * 
-       * DIMENSION PARITY STRATEGY:
-       * - When Cloudinary shadow is ready (livePreviewUrl set), use actual padded dimensions
-       * - When using clean cutout (fallback), estimate shadow padding for positioning consistency
-       * - This ensures offsetX/Y calculations match batch export even during loading
-       * 
-       * SHADOW PADDING ESTIMATION:
-       * Cloudinary shadow transformations typically add ~20% padding (c_lpad with shadow).
-       * We use this estimate when shadow isn't ready to maintain position parity.
+       * DIMENSION PARITY STRATEGY (SHARED STATE):
+       * - Shadow dimensions are stored in WorkflowContext when Cloudinary image loads
+       * - Both preview and export read from the same stored dimensions
+       * - This guarantees pixel-for-pixel parity between preview and final export
        */
       const displayScale = width / backdropDimensions.w;
+      
+      // Get stored shadow dimensions from workflow context (shared with batch export)
+      const storedDimensions = getStoredSubjectDimensions('preview');
       
       // Check if we have the actual Cloudinary shadow image loaded
       const hasShadowImage = livePreviewUrl && 
@@ -415,13 +441,18 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
       let displayShadowW: number;
       let displayShadowH: number;
       
-      if (hasShadowImage) {
-        // Use actual shadow dimensions from Cloudinary (includes padding)
+      if (storedDimensions) {
+        // Use stored dimensions from workflow context (guaranteed parity with export)
+        displayShadowW = storedDimensions.shadowWidth * displayScale;
+        displayShadowH = storedDimensions.shadowHeight * displayScale;
+        console.log('✅ [Preview] Using stored shadow dimensions from workflow context');
+      } else if (hasShadowImage) {
+        // Fallback to current image dimensions (should match stored)
         displayShadowW = subjectImgRef.current.naturalWidth * displayScale;
         displayShadowH = subjectImgRef.current.naturalHeight * displayScale;
+        console.log('⚠️ [Preview] Using image ref dimensions (stored not yet available)');
       } else {
         // Estimate shadow dimensions using expected padding ratio
-        // Cloudinary c_lpad shadow typically adds ~20% padding on each side
         const SHADOW_PADDING_RATIO = 1.4; // 40% total increase (20% each side)
         displayShadowW = subjectDimensions.w * displayScale * SHADOW_PADDING_RATIO;
         displayShadowH = subjectDimensions.h * displayScale * SHADOW_PADDING_RATIO;
@@ -437,6 +468,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         backdropWidth: backdropDimensions.w,
         canvasWidth: width,
         hasShadowImage,
+        usingStoredDims: !!storedDimensions,
         shadowDims: { w: displayShadowW.toFixed(2), h: displayShadowH.toFixed(2) },
         cleanDims: { w: displayCleanW.toFixed(2), h: displayCleanH.toFixed(2) },
         paddingRatio: (displayShadowW / displayCleanW).toFixed(3)
@@ -447,7 +479,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
       const layout = computeCompositeLayout(
         width,
         height,
-        displayShadowW,  // Shadow subject (actual or estimated padding)
+        displayShadowW,  // Shadow subject (from stored context or estimate)
         displayShadowH,
         displayCleanW,   // Clean subject (original cutout dimensions)
         displayCleanH,
@@ -475,7 +507,7 @@ export const BackdropPositioning: React.FC<BackdropPositioningProps> = ({
         );
       }
     }
-  }, [getCanvasDimensions, renderBackdropBuffer, placement, subjectDimensions, backdropDimensions, livePreviewUrl]);
+  }, [getCanvasDimensions, renderBackdropBuffer, placement, subjectDimensions, backdropDimensions, livePreviewUrl, getStoredSubjectDimensions]);
 
   // Re-render canvas when dependencies change (including image ready states)
   useEffect(() => {

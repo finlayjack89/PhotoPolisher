@@ -7,6 +7,20 @@ export interface ShadowConfig {
   opacity?: number;
 }
 
+export interface SubjectDimensions {
+  cleanWidth: number;
+  cleanHeight: number;
+  shadowWidth: number;
+  shadowHeight: number;
+  shadowUrl: string;
+  paddingRatio: number; // shadowWidth / cleanWidth ratio for reference
+  timestamp: number;
+}
+
+export interface SubjectMetadata {
+  [subjectId: string]: SubjectDimensions;
+}
+
 interface WorkflowState {
   step: 'upload' | 'remove-bg' | 'position' | 'finalize';
   uploadedFileIds: string[];
@@ -35,6 +49,7 @@ interface WorkflowState {
   shadowsGenerated: boolean;
   reflectionConfig: any;
   batchId: string | null;
+  subjectMetadata: SubjectMetadata;
 }
 
 interface WorkflowContextType {
@@ -56,6 +71,9 @@ interface WorkflowContextType {
   getUploadedFile: (fileId: string) => File | null;
   getAllUploadedFiles: () => File[];
   setAutoDeskewEnabled: (enabled: boolean) => void;
+  setSubjectDimensions: (subjectId: string, dimensions: SubjectDimensions) => void;
+  getSubjectDimensions: (subjectId: string) => SubjectDimensions | null;
+  clearSubjectDimensions: (subjectId: string) => void;
 }
 
 const WorkflowContext = createContext<WorkflowContextType | undefined>(undefined);
@@ -82,6 +100,7 @@ const initialState: WorkflowState = {
   reflectionConfig: null,
   batchId: null,
   autoDeskewEnabled: true,
+  subjectMetadata: {},
 };
 
 export function WorkflowProvider({ children }: { children: ReactNode }) {
@@ -246,6 +265,30 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, autoDeskewEnabled: enabled }));
   }, []);
 
+  // Subject dimension management for preview-export parity
+  const setSubjectDimensions = useCallback((subjectId: string, dimensions: SubjectDimensions) => {
+    console.log('📐 [WorkflowContext] Storing subject dimensions:', { subjectId, dimensions });
+    setState((prev) => ({
+      ...prev,
+      subjectMetadata: {
+        ...prev.subjectMetadata,
+        [subjectId]: dimensions
+      }
+    }));
+  }, []);
+
+  const getSubjectDimensions = useCallback((subjectId: string): SubjectDimensions | null => {
+    return state.subjectMetadata[subjectId] || null;
+  }, [state.subjectMetadata]);
+
+  const clearSubjectDimensions = useCallback((subjectId: string) => {
+    setState((prev) => {
+      const newMetadata = { ...prev.subjectMetadata };
+      delete newMetadata[subjectId];
+      return { ...prev, subjectMetadata: newMetadata };
+    });
+  }, []);
+
   // Memoize files and hasMissingFiles for stable references
   // This prevents infinite render loops in consuming components
   const files = useMemo(() => {
@@ -275,6 +318,9 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     getUploadedFile,
     getAllUploadedFiles,
     setAutoDeskewEnabled,
+    setSubjectDimensions,
+    getSubjectDimensions,
+    clearSubjectDimensions,
   }), [
     state,
     files,
@@ -294,6 +340,9 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     getUploadedFile,
     getAllUploadedFiles,
     setAutoDeskewEnabled,
+    setSubjectDimensions,
+    getSubjectDimensions,
+    clearSubjectDimensions,
   ]);
 
   return (
